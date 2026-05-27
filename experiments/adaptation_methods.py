@@ -258,7 +258,7 @@ def _fit_dann_single(
     model = _DANN(
         encoder=encoder, task=task, discriminator=disc,
         Xt=X_tgt_s, lambda_=lambda_, verbose=0, random_state=seed,
-        optimizer=tf.keras.optimizers.legacy.RMSprop(),
+        optimizer=tf.keras.optimizers.RMSprop(),
     )
     try:
         model.fit(X_tr_s, y_tr.astype("float32"), epochs=epochs, batch_size=batch_size)
@@ -386,7 +386,7 @@ def _fit_cdan_single(
     model = _CDAN(
         encoder=encoder, task=task, discriminator=disc,
         Xt=X_tgt_s, lambda_=lambda_, verbose=0, random_state=seed,
-        optimizer=tf.keras.optimizers.legacy.RMSprop(),
+        optimizer=tf.keras.optimizers.RMSprop(),
     )
     try:
         model.fit(X_tr_s, y_tr.astype("float32"), epochs=epochs, batch_size=batch_size)
