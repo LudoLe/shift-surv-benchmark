@@ -1,0 +1,9 @@
+numpy>=1.24
+scipy>=1.10
+scikit-learn>=1.3
+pandas>=2.0
+matplotlib>=3.7
+tensorflow>=2.13,<2.16
+adapt==0.4.5
+lifelines>=0.27
+scikit-survival>=0.21
