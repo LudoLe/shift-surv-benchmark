@@ -64,7 +64,7 @@ import numpy as np
 from scipy import stats as sp_stats
 
 from generator.scenarios import generate_scenario, SCENARIO_NAMES
-from experiments.baselines import fit_invariant_oracle, fit_all_observed, fit_all_observed_mlp
+from experiments.baselines import fit_invariant_oracle, fit_all_observed, fit_all_observed_mlp, fit_prior_recalib
 from experiments.adaptation_methods import fit_coral, fit_dann, fit_cdan, fit_irm
 from utils.io import save_table_csv
 
@@ -87,6 +87,7 @@ _DISPLAY = {
     "invariant_oracle": "inv_oracle",
     "all_observed":     "lr_erm",
     "coral":            "coral",
+    "prior_recalib":    "prior_recalib",
     "all_observed_mlp": "mlp_erm",
     "dann":             "dann",
     "cdan":             "cdan",
@@ -125,6 +126,7 @@ def _run_one(
         fit_invariant_oracle(src, tgt),
         fit_all_observed(src, tgt),
         fit_coral(src, tgt, seed=seed),
+        fit_prior_recalib(src, tgt),
         fit_dann(
             src, tgt, seed=seed,
             use_iwcv=use_iwcv,
@@ -321,7 +323,7 @@ def _print_implementation_report(
     print("  IMPLEMENTATION REPORT  (DA methods vs LR ERM baseline)")
     print(sep)
     idx = {(r["scenario"], r["method"]): r for r in agg}
-    da_methods = [m for m in methods if m in ("coral", "dann", "cdan", "irm")]
+    da_methods = [m for m in methods if m in ("coral", "prior_recalib", "dann", "cdan", "irm")]
 
     for m in da_methods:
         aurocs, nan_count = [], 0
@@ -394,7 +396,7 @@ def run_adaptation(
     if seeds is None:
         seeds = list(range(10))
 
-    methods = ["invariant_oracle", "all_observed", "coral", "dann", "cdan"]
+    methods = ["invariant_oracle", "all_observed", "coral", "prior_recalib", "dann", "cdan"]
     if include_irm:
         methods.append("irm")
 

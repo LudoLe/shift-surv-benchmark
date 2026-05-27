@@ -174,6 +174,84 @@ def fit_all_observed(
                           model=LogisticRegression(**_LR_KWARGS))
 
 
+def fit_prior_recalib(
+    source_datasets: list[DomainDataset],
+    target_dataset: DomainDataset,
+    n_em_iter: int = 50,
+) -> dict:
+    """
+    Prior-shift recalibration (Saerens, Latinne & Decaestecker 2002).
+
+    Fits an ERM LR on source, then estimates the target class prevalence π_tgt
+    from unlabeled target data via EM and rescales predictions accordingly.
+    No target labels are used.
+
+    EM update
+    ---------
+    E-step:  p̃(y=1|xᵢ) = f(xᵢ)·(π_tgt/π_src) / [f(xᵢ)·(π_tgt/π_src) + (1-f(xᵢ))·((1-π_tgt)/(1-π_src))]
+    M-step:  π_tgt ← mean(p̃(y=1|xᵢ))  over unlabeled target
+
+    Appropriate for: baseline_hazard_shift (stable P(Y|X), shifted class prior).
+    No benefit for: concept_shift (P(Y|X) changes), covariate_shift without prior shift.
+    AUROC: unchanged (rank-invariant to prior rescaling).
+    ECE/Brier: substantially improved when the prior shifted.
+    """
+    X_all, y_all = _pool_sources(source_datasets, "x")
+    X_tr, X_val, y_tr, y_val = train_test_split(
+        X_all, y_all, test_size=0.2, random_state=0, stratify=y_all,
+    )
+
+    scaler = StandardScaler()
+    X_tr_s  = scaler.fit_transform(X_tr)
+    X_val_s = scaler.transform(X_val)
+    X_tgt_s = scaler.transform(target_dataset.x)
+
+    model = LogisticRegression(**_LR_KWARGS)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=ConvergenceWarning)
+        model.fit(X_tr_s, y_tr)
+
+    pi_src    = float(y_tr.mean())
+    p_raw     = model.predict_proba(X_tgt_s)[:, 1]   # P_src(Y=1|x) on target x
+
+    # EM: estimate π_tgt from unlabeled target
+    pi_tgt = float(p_raw.mean())
+    for _ in range(n_em_iter):
+        num   = p_raw * (pi_tgt / pi_src)
+        den   = num + (1.0 - p_raw) * ((1.0 - pi_tgt) / (1.0 - pi_src))
+        p_adj = num / np.clip(den, 1e-12, None)
+        pi_new = float(p_adj.mean())
+        if abs(pi_new - pi_tgt) < 1e-7:
+            break
+        pi_tgt = pi_new
+
+    def _sc(y, p):
+        return {
+            "auroc":      round(auroc(y, p), 4),
+            "auprc":      round(auprc(y, p), 4),
+            "brier":      round(brier(y, p), 4),
+            "ece":        round(ece(y, p), 4),
+            "prevalence": round(prevalence(y), 4),
+            "n":          len(y),
+        }
+
+    source_scores = {}
+    for ds in source_datasets:
+        X_d = scaler.transform(ds.x)
+        source_scores[f"source_d{ds.domain_id}"] = _sc(ds.y, model.predict_proba(X_d)[:, 1])
+
+    return {
+        "feature_set":      "prior_recalib",
+        "source_domains":   source_scores,
+        "source_pooled":    _sc(y_val, model.predict_proba(X_val_s)[:, 1]),
+        "target":           _sc(target_dataset.y, p_adj),
+        "model":            model,
+        "scaler":           scaler,
+        "pi_src":           pi_src,
+        "pi_tgt_estimated": pi_tgt,
+    }
+
+
 def fit_invariant_oracle_mlp(
     source_datasets: list[DomainDataset],
     target_dataset: DomainDataset,
