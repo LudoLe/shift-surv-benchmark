@@ -210,13 +210,14 @@ def _build_networks(
     discriminator: Dense(32, relu) → Dense(1, sigmoid)
     """
     import tensorflow as tf
-    from tensorflow.keras import Sequential
+    from tensorflow.keras import Sequential, Input
     from tensorflow.keras.layers import Dense
 
     tf.random.set_seed(seed)
 
     encoder = Sequential([
-        Dense(enc_units[0], activation="relu", input_shape=(input_dim,)),
+        Input(shape=(input_dim,)),
+        Dense(enc_units[0], activation="relu"),
         Dense(enc_units[1], activation="relu"),
     ], name="encoder")
 
