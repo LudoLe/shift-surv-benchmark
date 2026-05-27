@@ -64,6 +64,12 @@ _DANN_BATCH   = 64
 _DANN_LAMBDA  = 1.0
 _CDAN_LAMBDA  = 0.1
 
+# IWCV grid-search defaults
+_DANN_EPOCHS_SEARCH  = 30    # epochs per candidate during HP search
+_DANN_EPOCHS_FINAL   = 100   # epochs for final retraining of best config
+_DEFAULT_LAMBDA_GRID = [0.1, 0.3, 1.0]
+_DEFAULT_ARCH_GRID   = [(32, 16), (64, 32)]
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -90,6 +96,30 @@ def _nan_score(n: int = 0) -> dict:
     d = {k: float("nan") for k in ["auroc", "auprc", "brier", "ece", "prevalence"]}
     d["n"] = n
     return d
+
+
+def _importance_weights(X_src: np.ndarray, X_tgt: np.ndarray) -> np.ndarray:
+    """Domain-classifier importance weights w(x) = P(tgt|x)/P(src|x), clipped to [0.05, 20]."""
+    X = np.vstack([X_src, X_tgt])
+    y = np.array([0] * len(X_src) + [1] * len(X_tgt), dtype=float)
+    clf = LogisticRegression(C=1.0, max_iter=500, random_state=0, solver="lbfgs")
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=ConvergenceWarning)
+        clf.fit(X, y)
+    p_tgt = clf.predict_proba(X_src)[:, 1]
+    p_src = np.clip(1.0 - p_tgt, 1e-6, None)
+    return np.clip(p_tgt / p_src, 0.05, 20.0)
+
+
+def _weighted_auroc(y_true: np.ndarray, probs: np.ndarray, weights: np.ndarray) -> float:
+    """AUROC with importance weights; falls back to unweighted on failure."""
+    from sklearn.metrics import roc_auc_score
+    if len(np.unique(y_true)) < 2:
+        return float("nan")
+    try:
+        return float(roc_auc_score(y_true, probs, sample_weight=weights))
+    except Exception:
+        return float(roc_auc_score(y_true, probs))
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +191,12 @@ def fit_coral(
 # Shared Keras architecture factory for DANN / CDAN
 # ---------------------------------------------------------------------------
 
-def _build_networks(input_dim: int, seed: int = 0, task_softmax: bool = False):
+def _build_networks(
+    input_dim: int,
+    seed: int = 0,
+    task_softmax: bool = False,
+    enc_units: tuple = _ENC_UNITS,
+):
     """
     Build fresh Keras encoder, task, and discriminator Sequential models.
 
@@ -169,10 +204,10 @@ def _build_networks(input_dim: int, seed: int = 0, task_softmax: bool = False):
 
     Architecture
     ~~~~~~~~~~~~
-    encoder      : Dense(64, relu) → Dense(32, relu)  [32-dim embedding]
-    task (DANN)  : Dense(1, sigmoid)                   [binary — ADAPT reshapes to match y shape]
-    task (CDAN)  : Dense(2, softmax)                   [multiclass — required by CDAN multilinear map]
-    discriminator: Dense(32, relu) → Dense(1, sigmoid) [domain classifier]
+    encoder      : Dense(enc_units[0], relu) → Dense(enc_units[1], relu)
+    task (DANN)  : Dense(1, sigmoid)
+    task (CDAN)  : Dense(2, softmax)
+    discriminator: Dense(32, relu) → Dense(1, sigmoid)
     """
     import tensorflow as tf
     from tensorflow.keras import Sequential
@@ -181,8 +216,8 @@ def _build_networks(input_dim: int, seed: int = 0, task_softmax: bool = False):
     tf.random.set_seed(seed)
 
     encoder = Sequential([
-        Dense(_ENC_UNITS[0], activation="relu", input_shape=(input_dim,)),
-        Dense(_ENC_UNITS[1], activation="relu"),
+        Dense(enc_units[0], activation="relu", input_shape=(input_dim,)),
+        Dense(enc_units[1], activation="relu"),
     ], name="encoder")
 
     if task_softmax:
@@ -211,6 +246,27 @@ def _squeeze_proba(model, X: np.ndarray) -> np.ndarray:
 # DANN
 # ---------------------------------------------------------------------------
 
+def _fit_dann_single(
+    X_tr_s, y_tr, X_tgt_s, lambda_, enc_units, epochs, batch_size, seed,
+):
+    """Train one DANN candidate; returns (model, None) or (None, error_str)."""
+    import tensorflow as tf
+    tf.random.set_seed(seed)
+    encoder, task, disc = _build_networks(
+        X_tr_s.shape[1], seed=seed, enc_units=enc_units,
+    )
+    model = _DANN(
+        encoder=encoder, task=task, discriminator=disc,
+        Xt=X_tgt_s, lambda_=lambda_, verbose=0, random_state=seed,
+        optimizer=tf.keras.optimizers.legacy.RMSprop(),
+    )
+    try:
+        model.fit(X_tr_s, y_tr.astype("float32"), epochs=epochs, batch_size=batch_size)
+        return model, None
+    except Exception as exc:
+        return None, str(exc)
+
+
 def fit_dann(
     source_datasets: list[DomainDataset],
     target_dataset: DomainDataset,
@@ -218,16 +274,26 @@ def fit_dann(
     epochs: int = _DANN_EPOCHS,
     batch_size: int = _DANN_BATCH,
     seed: int = 0,
+    # IWCV grid-search parameters (None → legacy single-fit behaviour)
+    lambda_grid: list | None = None,
+    arch_grid: list | None = None,
+    use_iwcv: bool = True,
+    epochs_search: int = _DANN_EPOCHS_SEARCH,
+    epochs_final: int = _DANN_EPOCHS_FINAL,
 ) -> dict:
     """
     DANN: Domain-Adversarial Neural Network.
 
-    The encoder jointly minimises task loss and maximises domain discriminator
-    loss (via gradient reversal).  Only source labels are used; target data is
-    passed as unlabeled (yt=None, the ADAPT default).
+    When *lambda_grid* and *arch_grid* are provided (or *use_iwcv* is True with
+    defaults), the function performs an IWCV grid search:
+      1. Estimate importance weights w(x) via a domain logistic classifier.
+      2. For each (lambda, arch) candidate, train for *epochs_search* epochs and
+         score the source-validation set under weights w — a proxy for
+         target AUROC without using target labels.
+      3. Retrain the best config for *epochs_final* epochs.
 
-    On training failure the function catches the exception and returns NaN
-    scores so multi-seed runs are not aborted.
+    When both grids are None and *use_iwcv* is False, falls back to the
+    original single-fit behaviour for backward compatibility.
     """
     import tensorflow as tf
 
@@ -241,30 +307,48 @@ def fit_dann(
     X_val_s = scaler.transform(X_val).astype("float32")
     X_tgt_s = scaler.transform(target_dataset.x).astype("float32")
 
-    tf.random.set_seed(seed)
-    encoder, task, disc = _build_networks(X_tr_s.shape[1], seed=seed)
+    # Resolve whether to run IWCV
+    run_iwcv = use_iwcv or (lambda_grid is not None) or (arch_grid is not None)
+    if run_iwcv:
+        lam_grid  = lambda_grid if lambda_grid is not None else _DEFAULT_LAMBDA_GRID
+        a_grid    = arch_grid   if arch_grid   is not None else _DEFAULT_ARCH_GRID
+        iw        = _importance_weights(X_tr_s, X_tgt_s)
+        best_score, best_cfg = -1.0, (lam_grid[0], a_grid[0])
+        hp_rows = []
+        for lam in lam_grid:
+            for arch in a_grid:
+                m, err = _fit_dann_single(
+                    X_tr_s, y_tr, X_tgt_s, lam, arch, epochs_search, batch_size, seed,
+                )
+                if m is None:
+                    score = float("nan")
+                else:
+                    p_val = _squeeze_proba(m, X_val_s)
+                    score = _weighted_auroc(y_val, p_val, iw)
+                hp_rows.append({"lambda": lam, "arch": arch, "iwcv_auroc": score})
+                if not np.isnan(score) and score > best_score:
+                    best_score, best_cfg = score, (lam, arch)
+        best_lam, best_arch = best_cfg
+        model, err = _fit_dann_single(
+            X_tr_s, y_tr, X_tgt_s, best_lam, best_arch, epochs_final, batch_size, seed,
+        )
+        chosen_lambda, chosen_arch = best_lam, best_arch
+    else:
+        hp_rows = []
+        model, err = _fit_dann_single(
+            X_tr_s, y_tr, X_tgt_s, lambda_, _ENC_UNITS, epochs, batch_size, seed,
+        )
+        chosen_lambda, chosen_arch = lambda_, _ENC_UNITS
 
-    model = _DANN(
-        encoder=encoder,
-        task=task,
-        discriminator=disc,
-        Xt=X_tgt_s,
-        lambda_=lambda_,
-        verbose=0,
-        random_state=seed,
-        optimizer=tf.keras.optimizers.legacy.RMSprop(),
-    )
-
-    try:
-        model.fit(X_tr_s, y_tr.astype("float32"), epochs=epochs, batch_size=batch_size)
-    except Exception as exc:
-        warnings.warn(f"DANN training failed (seed={seed}): {exc}")
+    if model is None:
+        warnings.warn(f"DANN training failed (seed={seed}): {err}")
         return {
             "feature_set":    "dann",
-            "error":          str(exc),
+            "error":          err,
             "source_domains": {},
             "source_pooled":  _nan_score(len(y_val)),
             "target":         _nan_score(target_dataset.n),
+            "hp": {"lambda": chosen_lambda, "arch": chosen_arch, "hp_rows": hp_rows},
         }
 
     probs_val = _squeeze_proba(model, X_val_s)
@@ -282,12 +366,34 @@ def fit_dann(
         "target":         _score(target_dataset.y, probs_tgt, target_dataset.n),
         "model":          model,
         "scaler":         scaler,
+        "hp": {"lambda": chosen_lambda, "arch": chosen_arch, "hp_rows": hp_rows},
     }
 
 
 # ---------------------------------------------------------------------------
 # CDAN
 # ---------------------------------------------------------------------------
+
+def _fit_cdan_single(
+    X_tr_s, y_tr, X_tgt_s, lambda_, enc_units, epochs, batch_size, seed,
+):
+    """Train one CDAN candidate; returns (model, None) or (None, error_str)."""
+    import tensorflow as tf
+    tf.random.set_seed(seed)
+    encoder, task, disc = _build_networks(
+        X_tr_s.shape[1], seed=seed, task_softmax=False, enc_units=enc_units,
+    )
+    model = _CDAN(
+        encoder=encoder, task=task, discriminator=disc,
+        Xt=X_tgt_s, lambda_=lambda_, verbose=0, random_state=seed,
+        optimizer=tf.keras.optimizers.legacy.RMSprop(),
+    )
+    try:
+        model.fit(X_tr_s, y_tr.astype("float32"), epochs=epochs, batch_size=batch_size)
+        return model, None
+    except Exception as exc:
+        return None, str(exc)
+
 
 def fit_cdan(
     source_datasets: list[DomainDataset],
@@ -296,16 +402,21 @@ def fit_cdan(
     epochs: int = _DANN_EPOCHS,
     batch_size: int = _DANN_BATCH,
     seed: int = 0,
+    # IWCV grid-search parameters (None → legacy single-fit behaviour)
+    lambda_grid: list | None = None,
+    arch_grid: list | None = None,
+    use_iwcv: bool = True,
+    epochs_search: int = _DANN_EPOCHS_SEARCH,
+    epochs_final: int = _DANN_EPOCHS_FINAL,
 ) -> dict:
     """
     CDAN: Conditional Domain-Adversarial Network.
 
     Extends DANN by conditioning the domain discriminator on the task-network
-    prediction via a multilinear map (outer product of encoder output and task
-    output).  With encoder dim=32 and task dim=1 the product dim is 32, so
-    max_features=4096 (default) is never hit.
+    prediction via a multilinear map.  With encoder dim=32 and task dim=1 the
+    product dimension is 32, so max_features=4096 (default) is never hit.
 
-    Same training protocol and failure handling as DANN.
+    IWCV grid-search follows the same protocol as fit_dann().
     """
     import tensorflow as tf
 
@@ -319,30 +430,47 @@ def fit_cdan(
     X_val_s = scaler.transform(X_val).astype("float32")
     X_tgt_s = scaler.transform(target_dataset.x).astype("float32")
 
-    tf.random.set_seed(seed)
-    encoder, task, disc = _build_networks(X_tr_s.shape[1], seed=seed, task_softmax=False)
+    run_iwcv = use_iwcv or (lambda_grid is not None) or (arch_grid is not None)
+    if run_iwcv:
+        lam_grid  = lambda_grid if lambda_grid is not None else _DEFAULT_LAMBDA_GRID
+        a_grid    = arch_grid   if arch_grid   is not None else _DEFAULT_ARCH_GRID
+        iw        = _importance_weights(X_tr_s, X_tgt_s)
+        best_score, best_cfg = -1.0, (lam_grid[0], a_grid[0])
+        hp_rows = []
+        for lam in lam_grid:
+            for arch in a_grid:
+                m, err = _fit_cdan_single(
+                    X_tr_s, y_tr, X_tgt_s, lam, arch, epochs_search, batch_size, seed,
+                )
+                if m is None:
+                    score = float("nan")
+                else:
+                    p_val = _squeeze_proba(m, X_val_s)
+                    score = _weighted_auroc(y_val, p_val, iw)
+                hp_rows.append({"lambda": lam, "arch": arch, "iwcv_auroc": score})
+                if not np.isnan(score) and score > best_score:
+                    best_score, best_cfg = score, (lam, arch)
+        best_lam, best_arch = best_cfg
+        model, err = _fit_cdan_single(
+            X_tr_s, y_tr, X_tgt_s, best_lam, best_arch, epochs_final, batch_size, seed,
+        )
+        chosen_lambda, chosen_arch = best_lam, best_arch
+    else:
+        hp_rows = []
+        model, err = _fit_cdan_single(
+            X_tr_s, y_tr, X_tgt_s, lambda_, _ENC_UNITS, epochs, batch_size, seed,
+        )
+        chosen_lambda, chosen_arch = lambda_, _ENC_UNITS
 
-    model = _CDAN(
-        encoder=encoder,
-        task=task,
-        discriminator=disc,
-        Xt=X_tgt_s,
-        lambda_=lambda_,
-        verbose=0,
-        random_state=seed,
-        optimizer=tf.keras.optimizers.legacy.RMSprop(),
-    )
-
-    try:
-        model.fit(X_tr_s, y_tr.astype("float32"), epochs=epochs, batch_size=batch_size)
-    except Exception as exc:
-        warnings.warn(f"CDAN training failed (seed={seed}): {exc}")
+    if model is None:
+        warnings.warn(f"CDAN training failed (seed={seed}): {err}")
         return {
             "feature_set":    "cdan",
-            "error":          str(exc),
+            "error":          err,
             "source_domains": {},
             "source_pooled":  _nan_score(len(y_val)),
             "target":         _nan_score(target_dataset.n),
+            "hp": {"lambda": chosen_lambda, "arch": chosen_arch, "hp_rows": hp_rows},
         }
 
     probs_val = _squeeze_proba(model, X_val_s)
@@ -360,6 +488,7 @@ def fit_cdan(
         "target":         _score(target_dataset.y, probs_tgt, target_dataset.n),
         "model":          model,
         "scaler":         scaler,
+        "hp": {"lambda": chosen_lambda, "arch": chosen_arch, "hp_rows": hp_rows},
     }
 
 

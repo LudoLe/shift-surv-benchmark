@@ -1,35 +1,52 @@
 """
 Phase-2 experiment runner: domain adaptation methods on all shift scenarios.
 
-Methods compared
-----------------
-  inv_oracle   — LR oracle on true invariant latent factors u_inv (ceiling)
-  all_observed — Pooled ERM LR on observed covariates x (source-only baseline)
+Design: 1 source domain + 1 target domain, linear observation model (nl_strength=0.0),
+IWCV for DANN/CDAN hyper-parameter selection.
+
+Core methods
+------------
+  inv_oracle   — LR on true invariant latent factors u_inv (upper bound)
+  all_observed — Pooled ERM LR on observed x (source-only baseline)
   coral        — CORAL with LR estimator
-  dann         — Domain-Adversarial Neural Network (TF/Keras)
-  cdan         — Conditional DANN (TF/Keras); skipped with --no_cdan
+  dann         — DANN with IWCV HP selection
+  cdan         — Conditional DANN with IWCV HP selection
+
+Optional / appendix
+-------------------
+  irm          — IRM (excluded from main benchmark; add --include_irm)
+
+Scenarios
+---------
+  Core    : no_shift, covariate_shift, spurious_shift, baseline_hazard_shift, concept_shift
+  Appendix: strong_covariate_shift, cure_shift  (add --include_appendix)
 
 Usage
 -----
-  cd /Users/ludole/Desktop/SHIFT-SURV
+  cd /path/to/SHIFT-SURV
 
-  # Quick smoke-test (1 seed, no CDAN):
-  python -m experiments.run_adaptation --single_seed --no_cdan
-
-  # Full 10-seed run:
+  # Paper benchmark (1+1, 5 scenarios, IWCV, 10 seeds):
   python -m experiments.run_adaptation
 
-  # Single scenario, 3 seeds:
-  python -m experiments.run_adaptation --scenario covariate_shift --n_seeds 3
+  # Quick smoke-test (1 seed):
+  python -m experiments.run_adaptation --n_seeds 1
 
-  # Skip CDAN:
-  python -m experiments.run_adaptation --no_cdan
+  # Include appendix scenarios:
+  python -m experiments.run_adaptation --include_appendix
 
-Outputs
+  # Covariate-shift IWCV ablation:
+  python -m experiments.run_adaptation --scenarios covariate_shift --no_iwcv \\
+      --out_prefix ablation_no_iwcv
+
+  # Legacy 3-source run:
+  python -m experiments.run_adaptation --n_source_domains 3 --out_prefix legacy_3s1t
+
+Outputs  (in outputs/tables/<out_prefix>_*.csv)
 -------
-  outputs/tables/adaptation_raw.csv      — one row per (scenario, seed, method)
-  outputs/tables/adaptation_summary.csv  — mean ± std ± 95-CI per (scenario, method)
-  outputs/tables/adaptation_compact.csv  — pivot: scenarios × methods, target AUROC/ECE/gap
+  *_raw.csv       — one row per (scenario, seed, method)
+  *_summary.csv   — mean ± std ± 95-CI per (scenario, method)
+  *_compact.csv   — pivot: scenarios × methods, tgt_auroc / gap / tgt_ece
+  *_hp_sweep.csv  — per-seed IWCV candidate scores for DANN/CDAN
 """
 
 from __future__ import annotations
@@ -52,20 +69,28 @@ from experiments.adaptation_methods import fit_coral, fit_dann, fit_cdan, fit_ir
 from utils.io import save_table_csv
 
 _TABLES = _ROOT / "outputs" / "tables"
-DEFAULT_SEEDS = list(range(42, 52))
 
-# Methods in display order — names must match feature_set keys returned by each fitter
-_ALL_METHODS = ["invariant_oracle", "all_observed", "coral", "irm", "all_observed_mlp", "dann", "cdan"]
+CORE_SCENARIOS = [
+    "no_shift",
+    "covariate_shift",
+    "spurious_shift",
+    "baseline_hazard_shift",
+    "concept_shift",
+]
+APPENDIX_SCENARIOS = [
+    "strong_covariate_shift",
+    "cure_shift",
+]
 
 # Short display labels (for column headers)
 _DISPLAY = {
-    "invariant_oracle":  "inv_oracle",
-    "all_observed":      "lr_erm",
-    "coral":             "coral",        # linear DA — compare to lr_erm
-    "irm":               "irm",          # invariant risk minimization
-    "all_observed_mlp":  "mlp_erm",
-    "dann":              "dann",         # neural DA — compare to mlp_erm
-    "cdan":              "cdan",
+    "invariant_oracle": "inv_oracle",
+    "all_observed":     "lr_erm",
+    "coral":            "coral",
+    "all_observed_mlp": "mlp_erm",
+    "dann":             "dann",
+    "cdan":             "cdan",
+    "irm":              "irm",
 }
 
 
@@ -77,28 +102,66 @@ def _run_one(
     scenario: str,
     seed: int,
     n_per_domain: int,
-    run_cdan: bool,
-    nl_strength: float = 0.3,
-) -> list[dict]:
-    """Generate one scenario/seed, fit all methods, return flat rows."""
+    n_source_domains: int,
+    use_iwcv: bool,
+    include_irm: bool,
+    nl_strength: float,
+    lambda_grid: list | None,
+    arch_grid: list | None,
+) -> tuple[list[dict], list[dict]]:
+    """Generate one scenario/seed, fit all methods, return (flat_rows, hp_rows)."""
     from generator.parameters import BaseParams
     base = BaseParams(seed=seed, nl_strength=nl_strength)
-    data = generate_scenario(scenario, n_source_domains=3,
-                             n_per_domain=n_per_domain, seed=seed, base=base)
+    data = generate_scenario(
+        scenario,
+        n_source_domains=n_source_domains,
+        n_per_domain=n_per_domain,
+        seed=seed,
+        base=base,
+    )
     src, tgt = data["source"], data["target"]
 
     results = [
         fit_invariant_oracle(src, tgt),
-        fit_all_observed(src, tgt),          # LR ERM  — natural baseline for CORAL
-        fit_coral(src, tgt, seed=seed),      # linear DA
-        fit_irm(src, tgt, seed=seed),        # invariant risk minimization
-        fit_all_observed_mlp(src, tgt),      # MLP ERM — natural baseline for DANN/CDAN
-        fit_dann(src, tgt, seed=seed),       # neural DA
+        fit_all_observed(src, tgt),
+        fit_coral(src, tgt, seed=seed),
+        fit_dann(
+            src, tgt, seed=seed,
+            use_iwcv=use_iwcv,
+            lambda_grid=lambda_grid,
+            arch_grid=arch_grid,
+        ),
+        fit_cdan(
+            src, tgt, seed=seed,
+            use_iwcv=use_iwcv,
+            lambda_grid=lambda_grid,
+            arch_grid=arch_grid,
+        ),
     ]
-    if run_cdan:
-        results.append(fit_cdan(src, tgt, seed=seed))
+    if include_irm:
+        results.append(fit_irm(src, tgt, seed=seed))
 
-    return [_flatten(r, scenario, seed) for r in results]
+    flat_rows = [_flatten(r, scenario, seed) for r in results]
+
+    # Collect HP sweep rows from DANN and CDAN
+    hp_rows: list[dict] = []
+    for r in results:
+        if "hp" in r and r["hp"].get("hp_rows"):
+            for hp in r["hp"]["hp_rows"]:
+                hp_rows.append({
+                    "scenario":   scenario,
+                    "seed":       seed,
+                    "method":     r["feature_set"],
+                    "lambda":     hp["lambda"],
+                    "arch":       str(hp["arch"]),
+                    "iwcv_auroc": hp["iwcv_auroc"],
+                    "chosen":     (
+                        hp["lambda"] == r["hp"]["lambda"]
+                        and str(hp["arch"]) == str(r["hp"]["arch"])
+                    ),
+                })
+
+    return flat_rows, hp_rows
 
 
 def _flatten(r: dict, scenario: str, seed: int) -> dict:
@@ -109,19 +172,16 @@ def _flatten(r: dict, scenario: str, seed: int) -> dict:
     ta  = tgt.get("auroc", float("nan"))
     gap = round(sa - ta, 4) if not (np.isnan(sa) or np.isnan(ta)) else float("nan")
     return {
-        "scenario": scenario,
-        "seed":     seed,
-        "method":   r.get("feature_set", "?"),
-        # source (held-out val)
+        "scenario":  scenario,
+        "seed":      seed,
+        "method":    r.get("feature_set", "?"),
         "src_auroc": sa,
         "src_auprc": sp.get("auprc", float("nan")),
         "src_ece":   sp.get("ece",   float("nan")),
-        # target
         "tgt_auroc": ta,
         "tgt_auprc": tgt.get("auprc", float("nan")),
         "tgt_ece":   tgt.get("ece",   float("nan")),
-        # gap (positive = degradation on target)
-        "gap": gap,
+        "gap":       gap,
     }
 
 
@@ -170,10 +230,7 @@ def _compact_table(
     scenarios: list[str],
     methods: list[str],
 ) -> list[dict]:
-    """
-    Pivot table: rows = scenarios, columns = methods × {tgt_auroc, gap, tgt_ece}.
-    Cell values are formatted as 'mean±CI' strings for readability.
-    """
+    """Pivot table: rows = scenarios, columns = methods × {tgt_auroc, gap, tgt_ece}."""
     idx = {(r["scenario"], r["method"]): r for r in agg}
 
     def _fmt(r, key):
@@ -241,13 +298,15 @@ def _print_full_report(
     agg: list[dict],
     scenarios: list[str],
     methods: list[str],
+    n_seeds: int,
 ) -> None:
     sep = "=" * 110
     print(f"\n{sep}")
-    print("  ADAPTATION METHODS — RESULTS ACROSS SCENARIOS  (mean ± 95% CI, 10 seeds)")
+    print(f"  ADAPTATION METHODS — RESULTS ACROSS SCENARIOS  (mean ± 95% CI, {n_seeds} seeds)")
     print(sep)
     _print_table(agg, scenarios, methods, "tgt_auroc", "Target AUROC  ↑")
-    _print_table(agg, scenarios, methods, "gap",       "AUROC gap  (source pooled − target; positive = degradation)  ↓", sign=True)
+    _print_table(agg, scenarios, methods, "gap",
+                 "AUROC gap  (source pooled − target; positive = degradation)  ↓", sign=True)
     _print_table(agg, scenarios, methods, "tgt_ece",   "Target ECE  ↓ (lower = better calibration)")
     _print_table(agg, scenarios, methods, "tgt_auprc", "Target AUPRC  ↑")
 
@@ -259,22 +318,13 @@ def _print_implementation_report(
 ) -> None:
     sep = "=" * 80
     print(f"\n{sep}")
-    print("  IMPLEMENTATION REPORT")
+    print("  IMPLEMENTATION REPORT  (DA methods vs LR ERM baseline)")
     print(sep)
     idx = {(r["scenario"], r["method"]): r for r in agg}
-    # Natural comparisons: CORAL vs LR ERM, DANN/CDAN vs MLP ERM
-    da_pairs = {
-        "coral": "all_observed",
-        "dann":  "all_observed_mlp",
-        "cdan":  "all_observed_mlp",
-    }
-    da_methods = [m for m in methods if m in da_pairs]
+    da_methods = [m for m in methods if m in ("coral", "dann", "cdan", "irm")]
 
     for m in da_methods:
-        ref_key = da_pairs[m]
-        ref_lbl = _DISPLAY.get(ref_key, ref_key)
-        aurocs = []
-        nan_count = 0
+        aurocs, nan_count = [], 0
         for sc in scenarios:
             r = idx.get((sc, m))
             if r:
@@ -285,41 +335,35 @@ def _print_implementation_report(
                     aurocs.append(v)
 
         stable = nan_count == 0 and len(aurocs) == len(scenarios)
-        print(f"\n  {m.upper()}  (vs {ref_lbl}):")
+        print(f"\n  {m.upper()}  (vs lr_erm):")
         if stable:
             print(f"    Status : STABLE — ran on all {len(scenarios)} scenarios without errors.")
             print(f"    AUROC range (target): [{min(aurocs):.3f}, {max(aurocs):.3f}]")
-            ref_aurocs = [idx[(sc, ref_key)].get("tgt_auroc_mean", float("nan"))
-                          for sc in scenarios if (sc, ref_key) in idx]
+            ref_aurocs = [
+                idx[(sc, "all_observed")].get("tgt_auroc_mean", float("nan"))
+                for sc in scenarios if (sc, "all_observed") in idx
+            ]
             deltas = [a - b for a, b in zip(aurocs, ref_aurocs)
                       if not (np.isnan(a) or np.isnan(b))]
             if deltas:
                 better = sum(1 for d in deltas if d > 0.005)
                 worse  = sum(1 for d in deltas if d < -0.005)
-                print(f"    vs {ref_lbl:12s}: better on {better}/{len(deltas)} scenarios, "
+                print(f"    vs lr_erm: better on {better}/{len(deltas)} scenarios, "
                       f"worse on {worse}/{len(deltas)}")
         else:
             print(f"    Status : UNSTABLE — {nan_count} scenario(s) returned NaN. "
                   f"Check warnings above.")
 
-    # Recommendation
-    print(f"\n  RECOMMENDATION:")
-    print(f"    Linear track  (LR ERM → CORAL):")
+    print(f"\n  DELTA vs LR ERM (tgt_auroc, per scenario):")
     for sc in scenarios:
-        lr  = idx.get((sc, "all_observed"),  {}).get("tgt_auroc_mean", float("nan"))
-        co  = idx.get((sc, "coral"),         {}).get("tgt_auroc_mean", float("nan"))
-        if not (np.isnan(lr) or np.isnan(co)):
-            delta = co - lr
-            marker = " ←" if abs(delta) > 0.005 else ""
-            print(f"      {sc:30s}  LR={lr:.3f}  CORAL={co:.3f}  Δ={delta:+.3f}{marker}")
-    print(f"    Neural track  (MLP ERM → DANN):")
-    for sc in scenarios:
-        mlp  = idx.get((sc, "all_observed_mlp"), {}).get("tgt_auroc_mean", float("nan"))
-        dann = idx.get((sc, "dann"),             {}).get("tgt_auroc_mean", float("nan"))
-        if not (np.isnan(mlp) or np.isnan(dann)):
-            delta = dann - mlp
-            marker = " ←" if abs(delta) > 0.005 else ""
-            print(f"      {sc:30s}  MLP={mlp:.3f}  DANN={dann:.3f}  Δ={delta:+.3f}{marker}")
+        lr = idx.get((sc, "all_observed"), {}).get("tgt_auroc_mean", float("nan"))
+        parts = [f"{sc:30s}  lr_erm={lr:.3f}"]
+        for m in da_methods:
+            v = idx.get((sc, m), {}).get("tgt_auroc_mean", float("nan"))
+            d = v - lr if not (np.isnan(v) or np.isnan(lr)) else float("nan")
+            lbl = _DISPLAY.get(m, m)
+            parts.append(f"  {lbl}={v:.3f}(Δ{d:+.3f})")
+        print("  " + "".join(parts))
     print()
 
 
@@ -328,25 +372,34 @@ def _print_implementation_report(
 # ---------------------------------------------------------------------------
 
 def run_adaptation(
-    scenarios: list[str] = SCENARIO_NAMES,
-    seeds: list[int] = DEFAULT_SEEDS,
+    scenarios: list[str] = CORE_SCENARIOS,
+    seeds: list[int] | None = None,
     n_per_domain: int = 500,
-    run_cdan: bool = True,
+    n_source_domains: int = 1,
+    use_iwcv: bool = True,
+    include_irm: bool = False,
+    nl_strength: float = 0.0,
+    out_prefix: str = "benchmark_1s1t",
+    lambda_grid: list | None = None,
+    arch_grid: list | None = None,
     verbose: bool = True,
-    nl_strength: float = 0.3,
 ) -> dict:
     """
     Run all methods across scenarios and seeds; aggregate and save results.
 
     Returns
     -------
-    dict with keys: "raw", "aggregated", "compact"
+    dict with keys: "raw", "aggregated", "compact", "hp_sweep"
     """
-    methods = ["invariant_oracle", "all_observed", "coral", "all_observed_mlp", "dann"]
-    if run_cdan:
-        methods.append("cdan")
+    if seeds is None:
+        seeds = list(range(10))
 
-    all_rows: list[dict] = []
+    methods = ["invariant_oracle", "all_observed", "coral", "dann", "cdan"]
+    if include_irm:
+        methods.append("irm")
+
+    all_rows:  list[dict] = []
+    all_hp:    list[dict] = []
     n_total = len(seeds) * len(scenarios)
     done = 0
 
@@ -356,12 +409,20 @@ def run_adaptation(
         for sc in scenarios:
             if verbose:
                 print(f"  {sc:30s} ...", end=" ", flush=True)
-            rows = _run_one(sc, seed, n_per_domain, run_cdan, nl_strength=nl_strength)
-            all_rows.extend(rows)
+            flat_rows, hp_rows = _run_one(
+                sc, seed, n_per_domain,
+                n_source_domains=n_source_domains,
+                use_iwcv=use_iwcv,
+                include_irm=include_irm,
+                nl_strength=nl_strength,
+                lambda_grid=lambda_grid,
+                arch_grid=arch_grid,
+            )
+            all_rows.extend(flat_rows)
+            all_hp.extend(hp_rows)
             done += 1
             if verbose:
-                # Quick summary of target AUROCs for this cell
-                method_aurocs = {r["method"]: r["tgt_auroc"] for r in rows}
+                method_aurocs = {r["method"]: r["tgt_auroc"] for r in flat_rows}
                 summary = "  ".join(
                     f"{m}={v:.3f}" for m, v in method_aurocs.items()
                     if not np.isnan(v)
@@ -372,18 +433,27 @@ def run_adaptation(
     compact = _compact_table(agg, scenarios, methods)
 
     _TABLES.mkdir(parents=True, exist_ok=True)
-    save_table_csv(all_rows, _TABLES / "adaptation_raw.csv")
-    save_table_csv(agg,      _TABLES / "adaptation_summary.csv")
-    save_table_csv(compact,  _TABLES / "adaptation_compact.csv")
+    save_table_csv(all_rows,  _TABLES / f"{out_prefix}_raw.csv")
+    save_table_csv(agg,       _TABLES / f"{out_prefix}_summary.csv")
+    save_table_csv(compact,   _TABLES / f"{out_prefix}_compact.csv")
+    if all_hp:
+        save_table_csv(all_hp, _TABLES / f"{out_prefix}_hp_sweep.csv")
 
     if verbose:
-        _print_full_report(agg, scenarios, methods)
+        _print_full_report(agg, scenarios, methods, n_seeds=len(seeds))
         _print_implementation_report(agg, scenarios, methods)
-        print(f"  Saved: {_TABLES}/adaptation_raw.csv")
-        print(f"  Saved: {_TABLES}/adaptation_summary.csv")
-        print(f"  Saved: {_TABLES}/adaptation_compact.csv")
+        print(f"  Saved: {_TABLES}/{out_prefix}_raw.csv")
+        print(f"  Saved: {_TABLES}/{out_prefix}_summary.csv")
+        print(f"  Saved: {_TABLES}/{out_prefix}_compact.csv")
+        if all_hp:
+            print(f"  Saved: {_TABLES}/{out_prefix}_hp_sweep.csv")
 
-    return {"raw": all_rows, "aggregated": agg, "compact": compact}
+    return {
+        "raw":        all_rows,
+        "aggregated": agg,
+        "compact":    compact,
+        "hp_sweep":   all_hp,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -392,36 +462,74 @@ def run_adaptation(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="SHIFT-SURV phase-2 adaptation benchmark",
+        description="SHIFT-SURV phase-2 adaptation benchmark (1+1 design)",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "--scenario", type=str, default=None,
-        help=f"Single scenario to run. Options: {SCENARIO_NAMES}",
+        "--scenarios", nargs="+", default=None, metavar="SCENARIO",
+        help=f"Scenarios to run (space-separated). Defaults to core 5. "
+             f"Available: {CORE_SCENARIOS + APPENDIX_SCENARIOS}",
     )
-    parser.add_argument("--n_seeds", type=int, default=10,
-                        help="Number of seeds (starting from 42). Ignored with --single_seed.")
-    parser.add_argument("--single_seed", action="store_true",
-                        help="Run only seed 42 (quick check).")
-    parser.add_argument("--seed",    type=int, default=42,
-                        help="Seed to use with --single_seed.")
-    parser.add_argument("--n",       type=int, default=500,
-                        help="Samples per domain.")
-    parser.add_argument("--no_cdan", action="store_true",
-                        help="Skip CDAN.")
-    parser.add_argument("--quiet",   action="store_true",
-                        help="Suppress verbose output.")
-    parser.add_argument("--nl_strength", type=float, default=0.3,
-                        help="Quadratic observation nonlinearity α (0.0 = fully linear).")
+    parser.add_argument(
+        "--include_appendix", action="store_true",
+        help="Append strong_covariate_shift and cure_shift to the scenario list.",
+    )
+    parser.add_argument(
+        "--include_irm", action="store_true",
+        help="Include IRM in the method set.",
+    )
+    parser.add_argument(
+        "--n_source_domains", type=int, default=1,
+        help="Number of source domains (1 = benchmark default).",
+    )
+    parser.add_argument(
+        "--n_seeds", type=int, default=10,
+        help="Number of seeds.",
+    )
+    parser.add_argument(
+        "--seed_start", type=int, default=0,
+        help="First seed value (seeds = range(seed_start, seed_start + n_seeds)).",
+    )
+    parser.add_argument(
+        "--n", type=int, default=500,
+        help="Samples per domain.",
+    )
+    parser.add_argument(
+        "--nl_strength", type=float, default=0.0,
+        help="Observation nonlinearity α (0.0 = fully linear).",
+    )
+    parser.add_argument(
+        "--use_iwcv", dest="use_iwcv", action="store_true", default=True,
+        help="Use IWCV for DANN/CDAN HP selection (default: on).",
+    )
+    parser.add_argument(
+        "--no_iwcv", dest="use_iwcv", action="store_false",
+        help="Disable IWCV; use source-only validation instead.",
+    )
+    parser.add_argument(
+        "--out_prefix", type=str, default="benchmark_1s1t",
+        help="Output filename prefix (outputs/tables/<prefix>_*.csv).",
+    )
+    parser.add_argument(
+        "--quiet", action="store_true",
+        help="Suppress verbose output.",
+    )
     args = parser.parse_args()
 
-    scenarios = [args.scenario] if args.scenario else SCENARIO_NAMES
-    seeds     = [args.seed] if args.single_seed else list(range(42, 42 + args.n_seeds))
+    scenarios = list(args.scenarios) if args.scenarios else list(CORE_SCENARIOS)
+    if args.include_appendix:
+        scenarios = scenarios + [s for s in APPENDIX_SCENARIOS if s not in scenarios]
+
+    seeds = list(range(args.seed_start, args.seed_start + args.n_seeds))
 
     run_adaptation(
         scenarios=scenarios,
         seeds=seeds,
         n_per_domain=args.n,
-        run_cdan=not args.no_cdan,
-        verbose=not args.quiet,
+        n_source_domains=args.n_source_domains,
+        use_iwcv=args.use_iwcv,
+        include_irm=args.include_irm,
         nl_strength=args.nl_strength,
+        out_prefix=args.out_prefix,
+        verbose=not args.quiet,
     )
