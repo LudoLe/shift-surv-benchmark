@@ -62,6 +62,9 @@ if str(_ROOT) not in sys.path:
 
 import numpy as np
 from scipy import stats as sp_stats
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 from generator.scenarios import generate_scenario, SCENARIO_NAMES
 from experiments.baselines import fit_invariant_oracle, fit_all_observed, fit_prior_recalib
@@ -160,7 +163,21 @@ def _run_one(
                     ),
                 })
 
-    return flat_rows, hp_rows
+    # Collect loss histories from DANN and CDAN
+    loss_rows: list[dict] = []
+    for r in results:
+        hist = r.get("loss_history", {})
+        if not hist:
+            continue
+        n_epochs = len(next(iter(hist.values()), []))
+        for ep in range(n_epochs):
+            row = {"scenario": scenario, "seed": seed, "method": r["feature_set"], "epoch": ep}
+            for key, vals in hist.items():
+                if ep < len(vals):
+                    row[key] = vals[ep]
+            loss_rows.append(row)
+
+    return flat_rows, hp_rows, loss_rows
 
 
 def _flatten(r: dict, scenario: str, seed: int) -> dict:
@@ -171,16 +188,19 @@ def _flatten(r: dict, scenario: str, seed: int) -> dict:
     ta  = tgt.get("auroc", float("nan"))
     gap = round(sa - ta, 4) if not (np.isnan(sa) or np.isnan(ta)) else float("nan")
     return {
-        "scenario":  scenario,
-        "seed":      seed,
-        "method":    r.get("feature_set", "?"),
-        "src_auroc": sa,
-        "src_auprc": sp.get("auprc", float("nan")),
-        "src_ece":   sp.get("ece",   float("nan")),
-        "tgt_auroc": ta,
-        "tgt_auprc": tgt.get("auprc", float("nan")),
-        "tgt_ece":   tgt.get("ece",   float("nan")),
-        "gap":       gap,
+        "scenario":       scenario,
+        "seed":           seed,
+        "method":         r.get("feature_set", "?"),
+        "src_auroc":      sa,
+        "src_auprc":      sp.get("auprc",  float("nan")),
+        "src_ece":        sp.get("ece",    float("nan")),
+        "tgt_auroc":      ta,
+        "tgt_auprc":      tgt.get("auprc", float("nan")),
+        "tgt_ece":        tgt.get("ece",   float("nan")),
+        "gap":            gap,
+        "tgt_f1":         tgt.get("f1",          float("nan")),
+        "tgt_sensitivity": tgt.get("sensitivity", float("nan")),
+        "tgt_specificity": tgt.get("specificity", float("nan")),
     }
 
 
@@ -189,7 +209,8 @@ def _flatten(r: dict, scenario: str, seed: int) -> dict:
 # ---------------------------------------------------------------------------
 
 _METRIC_KEYS = ["src_auroc", "src_auprc", "src_ece",
-                "tgt_auroc", "tgt_auprc", "tgt_ece", "gap"]
+                "tgt_auroc", "tgt_auprc", "tgt_ece", "gap",
+                "tgt_f1", "tgt_sensitivity", "tgt_specificity"]
 
 
 def _aggregate(
@@ -303,11 +324,81 @@ def _print_full_report(
     print(f"\n{sep}")
     print(f"  ADAPTATION METHODS — RESULTS ACROSS SCENARIOS  (mean ± 95% CI, {n_seeds} seeds)")
     print(sep)
-    _print_table(agg, scenarios, methods, "tgt_auroc", "Target AUROC  ↑")
+    _print_table(agg, scenarios, methods, "tgt_auroc",      "Target AUROC  ↑")
     _print_table(agg, scenarios, methods, "gap",
                  "AUROC gap  (source pooled − target; positive = degradation)  ↓", sign=True)
-    _print_table(agg, scenarios, methods, "tgt_ece",   "Target ECE  ↓ (lower = better calibration)")
-    _print_table(agg, scenarios, methods, "tgt_auprc", "Target AUPRC  ↑")
+    _print_table(agg, scenarios, methods, "tgt_ece",        "Target ECE  ↓ (lower = better calibration)")
+    _print_table(agg, scenarios, methods, "tgt_auprc",      "Target AUPRC  ↑")
+    _print_table(agg, scenarios, methods, "tgt_f1",         "Target F1  ↑  (threshold = 0.5)")
+    _print_table(agg, scenarios, methods, "tgt_sensitivity","Target Sensitivity  ↑  (threshold = 0.5)")
+    _print_table(agg, scenarios, methods, "tgt_specificity","Target Specificity  ↑  (threshold = 0.5)")
+
+
+def _plot_loss_curves(
+    loss_rows: list[dict],
+    scenarios: list[str],
+    out_dir: Path,
+    prefix: str,
+) -> None:
+    """
+    One PNG per scenario: 2 subplots (DANN, CDAN).
+    Each subplot: per-seed train/val loss as thin lines + mean as thick line.
+    """
+    if not loss_rows:
+        return
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for sc in scenarios:
+        sc_rows = [r for r in loss_rows if r["scenario"] == sc]
+        if not sc_rows:
+            continue
+
+        fig, axes = plt.subplots(1, 2, figsize=(10, 4), sharey=False)
+        fig.suptitle(f"Loss curves — {sc}", fontsize=12)
+
+        for ax, method in zip(axes, ["dann", "cdan"]):
+            m_rows = [r for r in sc_rows if r["method"] == method]
+            if not m_rows:
+                ax.set_title(method.upper())
+                ax.set_visible(False)
+                continue
+
+            seeds = sorted({r["seed"] for r in m_rows})
+            # collect per-seed arrays
+            train_curves, val_curves = [], []
+            for s in seeds:
+                s_rows = sorted([r for r in m_rows if r["seed"] == s], key=lambda x: x["epoch"])
+                if not s_rows:
+                    continue
+                tr = [r.get("loss", float("nan")) for r in s_rows]
+                vl = [r.get("val_loss", float("nan")) for r in s_rows]
+                train_curves.append(tr)
+                if any(not np.isnan(v) for v in vl):
+                    val_curves.append(vl)
+                ax.plot(tr, color="steelblue", alpha=0.25, linewidth=0.8)
+                if any(not np.isnan(v) for v in vl):
+                    ax.plot(vl, color="tomato", alpha=0.25, linewidth=0.8)
+
+            # mean curves
+            max_ep = max(len(c) for c in train_curves) if train_curves else 0
+            if train_curves:
+                padded = [c + [float("nan")] * (max_ep - len(c)) for c in train_curves]
+                mean_tr = np.nanmean(padded, axis=0)
+                ax.plot(mean_tr, color="steelblue", linewidth=2, label="train loss (mean)")
+            if val_curves:
+                padded_v = [c + [float("nan")] * (max_ep - len(c)) for c in val_curves]
+                mean_vl = np.nanmean(padded_v, axis=0)
+                ax.plot(mean_vl, color="tomato", linewidth=2, label="val loss (mean)")
+
+            ax.set_title(method.upper())
+            ax.set_xlabel("Epoch")
+            ax.set_ylabel("Loss")
+            ax.legend(fontsize=8)
+
+        plt.tight_layout()
+        out_path = out_dir / f"{prefix}_loss_{sc}.png"
+        plt.savefig(out_path, dpi=120)
+        plt.close(fig)
 
 
 def _print_implementation_report(
@@ -396,6 +487,7 @@ def run_adaptation(
 
     all_rows:  list[dict] = []
     all_hp:    list[dict] = []
+    all_loss:  list[dict] = []
     n_total = len(seeds) * len(scenarios)
     done = 0
 
@@ -405,7 +497,7 @@ def run_adaptation(
         for sc in scenarios:
             if verbose:
                 print(f"  {sc:30s} ...", end=" ", flush=True)
-            flat_rows, hp_rows = _run_one(
+            flat_rows, hp_rows, loss_rows = _run_one(
                 sc, seed, n_per_domain,
                 n_source_domains=n_source_domains,
                 use_iwcv=use_iwcv,
@@ -415,6 +507,7 @@ def run_adaptation(
             )
             all_rows.extend(flat_rows)
             all_hp.extend(hp_rows)
+            all_loss.extend(loss_rows)
             done += 1
             if verbose:
                 method_aurocs = {r["method"]: r["tgt_auroc"] for r in flat_rows}
@@ -433,6 +526,11 @@ def run_adaptation(
     save_table_csv(compact,   _TABLES / f"{out_prefix}_compact.csv")
     if all_hp:
         save_table_csv(all_hp, _TABLES / f"{out_prefix}_hp_sweep.csv")
+    if all_loss:
+        save_table_csv(all_loss, _TABLES / f"{out_prefix}_loss_history.csv")
+
+    _FIGURES = _ROOT / "outputs" / "figures"
+    _plot_loss_curves(all_loss, scenarios, _FIGURES, out_prefix)
 
     if verbose:
         _print_full_report(agg, scenarios, methods, n_seeds=len(seeds))
@@ -442,12 +540,16 @@ def run_adaptation(
         print(f"  Saved: {_TABLES}/{out_prefix}_compact.csv")
         if all_hp:
             print(f"  Saved: {_TABLES}/{out_prefix}_hp_sweep.csv")
+        if all_loss:
+            print(f"  Saved: {_TABLES}/{out_prefix}_loss_history.csv")
+            print(f"  Saved: {_FIGURES}/{out_prefix}_loss_<scenario>.png")
 
     return {
-        "raw":        all_rows,
-        "aggregated": agg,
-        "compact":    compact,
-        "hp_sweep":   all_hp,
+        "raw":          all_rows,
+        "aggregated":   agg,
+        "compact":      compact,
+        "hp_sweep":     all_hp,
+        "loss_history": all_loss,
     }
 
 

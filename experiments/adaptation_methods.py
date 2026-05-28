@@ -38,7 +38,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
 from generator.base_generator import DomainDataset
-from utils.metrics import auroc, auprc, brier, ece, prevalence
+from utils.metrics import auroc, auprc, ece, prevalence, f1, sensitivity, specificity
 
 # Suppress TF C++ startup messages before the first TF import.
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
@@ -83,17 +83,19 @@ def _pool_sources(datasets: list[DomainDataset]) -> tuple[np.ndarray, np.ndarray
 
 def _score(y_true: np.ndarray, probs: np.ndarray, n: int) -> dict:
     return {
-        "auroc":      round(auroc(y_true, probs), 4),
-        "auprc":      round(auprc(y_true, probs), 4),
-        "brier":      round(brier(y_true, probs), 4),
-        "ece":        round(ece(y_true, probs), 4),
-        "prevalence": round(prevalence(y_true), 4),
+        "auroc":       round(auroc(y_true, probs), 4),
+        "auprc":       round(auprc(y_true, probs), 4),
+        "ece":         round(ece(y_true, probs), 4),
+        "f1":          round(f1(y_true, probs), 4),
+        "sensitivity": round(sensitivity(y_true, probs), 4),
+        "specificity": round(specificity(y_true, probs), 4),
+        "prevalence":  round(prevalence(y_true), 4),
         "n": n,
     }
 
 
 def _nan_score(n: int = 0) -> dict:
-    d = {k: float("nan") for k in ["auroc", "auprc", "brier", "ece", "prevalence"]}
+    d = {k: float("nan") for k in ["auroc", "auprc", "ece", "f1", "sensitivity", "specificity", "prevalence"]}
     d["n"] = n
     return d
 
@@ -273,9 +275,12 @@ def _fit_dann_single(
         )]
     try:
         model.fit(X_tr_s, y_tr.astype("float32"), **fit_kwargs)
-        return model, None
+        hist = {k: [float(v) for v in vals]
+                for k, vals in getattr(model, "history_", {}).items()
+                if isinstance(vals, (list, np.ndarray))}
+        return model, None, hist
     except Exception as exc:
-        return None, str(exc)
+        return None, str(exc), {}
 
 
 def fit_dann(
@@ -328,7 +333,7 @@ def fit_dann(
         hp_rows = []
         for lam in lam_grid:
             for arch in a_grid:
-                m, err = _fit_dann_single(
+                m, err, _ = _fit_dann_single(
                     X_tr_s, y_tr, X_tgt_s, lam, arch, epochs_search, batch_size, seed,
                 )
                 if m is None:
@@ -340,14 +345,14 @@ def fit_dann(
                 if not np.isnan(score) and score > best_score:
                     best_score, best_cfg = score, (lam, arch)
         best_lam, best_arch = best_cfg
-        model, err = _fit_dann_single(
+        model, err, loss_history = _fit_dann_single(
             X_tr_s, y_tr, X_tgt_s, best_lam, best_arch, epochs_final, batch_size, seed,
             X_val_s=X_val_s, y_val=y_val, early_stopping_patience=10,
         )
         chosen_lambda, chosen_arch = best_lam, best_arch
     else:
         hp_rows = []
-        model, err = _fit_dann_single(
+        model, err, loss_history = _fit_dann_single(
             X_tr_s, y_tr, X_tgt_s, lambda_, _ENC_UNITS, epochs, batch_size, seed,
         )
         chosen_lambda, chosen_arch = lambda_, _ENC_UNITS
@@ -361,6 +366,7 @@ def fit_dann(
             "source_pooled":  _nan_score(len(y_val)),
             "target":         _nan_score(target_dataset.n),
             "hp": {"lambda": chosen_lambda, "arch": chosen_arch, "hp_rows": hp_rows},
+            "loss_history":   {},
         }
 
     probs_val = _squeeze_proba(model, X_val_s)
@@ -378,7 +384,8 @@ def fit_dann(
         "target":         _score(target_dataset.y, probs_tgt, target_dataset.n),
         "model":          model,
         "scaler":         scaler,
-        "hp": {"lambda": chosen_lambda, "arch": chosen_arch, "hp_rows": hp_rows},
+        "hp":             {"lambda": chosen_lambda, "arch": chosen_arch, "hp_rows": hp_rows},
+        "loss_history":   loss_history,
     }
 
 
@@ -412,9 +419,12 @@ def _fit_cdan_single(
         )]
     try:
         model.fit(X_tr_s, y_tr.astype("float32"), **fit_kwargs)
-        return model, None
+        hist = {k: [float(v) for v in vals]
+                for k, vals in getattr(model, "history_", {}).items()
+                if isinstance(vals, (list, np.ndarray))}
+        return model, None, hist
     except Exception as exc:
-        return None, str(exc)
+        return None, str(exc), {}
 
 
 def fit_cdan(
@@ -461,7 +471,7 @@ def fit_cdan(
         hp_rows = []
         for lam in lam_grid:
             for arch in a_grid:
-                m, err = _fit_cdan_single(
+                m, err, _ = _fit_cdan_single(
                     X_tr_s, y_tr, X_tgt_s, lam, arch, epochs_search, batch_size, seed,
                 )
                 if m is None:
@@ -473,14 +483,14 @@ def fit_cdan(
                 if not np.isnan(score) and score > best_score:
                     best_score, best_cfg = score, (lam, arch)
         best_lam, best_arch = best_cfg
-        model, err = _fit_cdan_single(
+        model, err, loss_history = _fit_cdan_single(
             X_tr_s, y_tr, X_tgt_s, best_lam, best_arch, epochs_final, batch_size, seed,
             X_val_s=X_val_s, y_val=y_val, early_stopping_patience=10,
         )
         chosen_lambda, chosen_arch = best_lam, best_arch
     else:
         hp_rows = []
-        model, err = _fit_cdan_single(
+        model, err, loss_history = _fit_cdan_single(
             X_tr_s, y_tr, X_tgt_s, lambda_, _ENC_UNITS, epochs, batch_size, seed,
         )
         chosen_lambda, chosen_arch = lambda_, _ENC_UNITS
@@ -493,7 +503,8 @@ def fit_cdan(
             "source_domains": {},
             "source_pooled":  _nan_score(len(y_val)),
             "target":         _nan_score(target_dataset.n),
-            "hp": {"lambda": chosen_lambda, "arch": chosen_arch, "hp_rows": hp_rows},
+            "hp":             {"lambda": chosen_lambda, "arch": chosen_arch, "hp_rows": hp_rows},
+            "loss_history":   {},
         }
 
     probs_val = _squeeze_proba(model, X_val_s)
@@ -511,7 +522,8 @@ def fit_cdan(
         "target":         _score(target_dataset.y, probs_tgt, target_dataset.n),
         "model":          model,
         "scaler":         scaler,
-        "hp": {"lambda": chosen_lambda, "arch": chosen_arch, "hp_rows": hp_rows},
+        "hp":             {"lambda": chosen_lambda, "arch": chosen_arch, "hp_rows": hp_rows},
+        "loss_history":   loss_history,
     }
 
 

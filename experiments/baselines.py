@@ -33,7 +33,7 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 
 from generator.base_generator import DomainDataset
-from utils.metrics import auroc, auprc, brier, ece, prevalence
+from utils.metrics import auroc, auprc, ece, prevalence, f1, sensitivity, specificity
 
 
 _LR_KWARGS = dict(max_iter=500, solver="lbfgs", C=1.0, random_state=0)
@@ -103,11 +103,13 @@ def _fit_and_score(
         X_ds = scaler.transform(getattr(ds, feature_attr))
         probs = model.predict_proba(X_ds)[:, 1]
         return {
-            "auroc": round(auroc(ds.y, probs), 4),
-            "auprc": round(auprc(ds.y, probs), 4),
-            "brier": round(brier(ds.y, probs), 4),
-            "ece": round(ece(ds.y, probs), 4),
-            "prevalence": round(prevalence(ds.y), 4),
+            "auroc":       round(auroc(ds.y, probs), 4),
+            "auprc":       round(auprc(ds.y, probs), 4),
+            "ece":         round(ece(ds.y, probs), 4),
+            "f1":          round(f1(ds.y, probs), 4),
+            "sensitivity": round(sensitivity(ds.y, probs), 4),
+            "specificity": round(specificity(ds.y, probs), 4),
+            "prevalence":  round(prevalence(ds.y), 4),
             "n": ds.n,
         }
 
@@ -117,11 +119,13 @@ def _fit_and_score(
     # Held-out validation score — unbiased estimate of source performance
     probs_val = model.predict_proba(scaler.transform(X_val))[:, 1]
     source_pooled = {
-        "auroc": round(auroc(y_val, probs_val), 4),
-        "auprc": round(auprc(y_val, probs_val), 4),
-        "brier": round(brier(y_val, probs_val), 4),
-        "ece": round(ece(y_val, probs_val), 4),
-        "prevalence": round(prevalence(y_val), 4),
+        "auroc":       round(auroc(y_val, probs_val), 4),
+        "auprc":       round(auprc(y_val, probs_val), 4),
+        "ece":         round(ece(y_val, probs_val), 4),
+        "f1":          round(f1(y_val, probs_val), 4),
+        "sensitivity": round(sensitivity(y_val, probs_val), 4),
+        "specificity": round(specificity(y_val, probs_val), 4),
+        "prevalence":  round(prevalence(y_val), 4),
         "n": len(y_val),
     }
 
@@ -227,12 +231,14 @@ def fit_prior_recalib(
 
     def _sc(y, p):
         return {
-            "auroc":      round(auroc(y, p), 4),
-            "auprc":      round(auprc(y, p), 4),
-            "brier":      round(brier(y, p), 4),
-            "ece":        round(ece(y, p), 4),
-            "prevalence": round(prevalence(y), 4),
-            "n":          len(y),
+            "auroc":       round(auroc(y, p), 4),
+            "auprc":       round(auprc(y, p), 4),
+            "ece":         round(ece(y, p), 4),
+            "f1":          round(f1(y, p), 4),
+            "sensitivity": round(sensitivity(y, p), 4),
+            "specificity": round(specificity(y, p), 4),
+            "prevalence":  round(prevalence(y), 4),
+            "n":           len(y),
         }
 
     source_scores = {}
@@ -303,7 +309,7 @@ def evaluate_all_baselines(
 def baselines_to_flat_rows(results: list[dict]) -> list[dict]:
     """
     Flatten baseline results to a list of rows suitable for a summary CSV.
-    Each row: feature_set, split, domain, auroc, auprc, brier, prevalence, n
+    Each row: feature_set, split, domain, auroc, auprc, ece, f1, sensitivity, specificity, prevalence, n
     """
     rows = []
     for r in results:

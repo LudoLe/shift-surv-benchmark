@@ -3,7 +3,7 @@ Evaluation metrics for fixed-horizon binary prediction.
 """
 from __future__ import annotations
 import numpy as np
-from sklearn.metrics import roc_auc_score, average_precision_score
+from sklearn.metrics import roc_auc_score, average_precision_score, confusion_matrix
 
 
 def auroc(y_true: np.ndarray, y_score: np.ndarray) -> float:
@@ -48,6 +48,34 @@ def ece(y_true: np.ndarray, y_prob: np.ndarray, n_bins: int = 10) -> float:
             continue
         ece_val += (n_b / n) * abs(float(y_true[mask].mean()) - float(y_prob[mask].mean()))
     return float(ece_val)
+
+
+def sensitivity(y_true: np.ndarray, y_prob: np.ndarray, threshold: float = 0.5) -> float:
+    """Recall / TPR at a fixed threshold."""
+    y_pred = (y_prob >= threshold).astype(int)
+    if len(np.unique(y_true)) < 2:
+        return float("nan")
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
+    return float(tp / (tp + fn)) if (tp + fn) > 0 else float("nan")
+
+
+def specificity(y_true: np.ndarray, y_prob: np.ndarray, threshold: float = 0.5) -> float:
+    """TNR at a fixed threshold."""
+    y_pred = (y_prob >= threshold).astype(int)
+    if len(np.unique(y_true)) < 2:
+        return float("nan")
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
+    return float(tn / (tn + fp)) if (tn + fp) > 0 else float("nan")
+
+
+def f1(y_true: np.ndarray, y_prob: np.ndarray, threshold: float = 0.5) -> float:
+    """F1 score at a fixed threshold."""
+    y_pred = (y_prob >= threshold).astype(int)
+    if len(np.unique(y_true)) < 2:
+        return float("nan")
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
+    denom = 2 * tp + fp + fn
+    return float(2 * tp / denom) if denom > 0 else float("nan")
 
 
 def summarise_performance(
