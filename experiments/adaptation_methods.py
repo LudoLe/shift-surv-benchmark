@@ -249,9 +249,12 @@ def _squeeze_proba(model, X: np.ndarray) -> np.ndarray:
 
 def _fit_dann_single(
     X_tr_s, y_tr, X_tgt_s, lambda_, enc_units, epochs, batch_size, seed,
+    X_val_s=None, y_val=None, early_stopping_patience=0,
 ):
     """Train one DANN candidate; returns (model, None) or (None, error_str)."""
     import tensorflow as tf
+    from tensorflow.keras.callbacks import EarlyStopping
+
     tf.random.set_seed(seed)
     encoder, task, disc = _build_networks(
         X_tr_s.shape[1], seed=seed, enc_units=enc_units,
@@ -261,8 +264,15 @@ def _fit_dann_single(
         Xt=X_tgt_s, lambda_=lambda_, verbose=0, random_state=seed,
         optimizer=tf.keras.optimizers.RMSprop(),
     )
+    fit_kwargs = {"epochs": epochs, "batch_size": batch_size}
+    if early_stopping_patience > 0 and X_val_s is not None:
+        fit_kwargs["validation_data"] = (X_val_s, y_val.astype("float32"))
+        fit_kwargs["callbacks"] = [EarlyStopping(
+            monitor="val_loss", patience=early_stopping_patience,
+            restore_best_weights=True, min_delta=1e-4,
+        )]
     try:
-        model.fit(X_tr_s, y_tr.astype("float32"), epochs=epochs, batch_size=batch_size)
+        model.fit(X_tr_s, y_tr.astype("float32"), **fit_kwargs)
         return model, None
     except Exception as exc:
         return None, str(exc)
@@ -332,6 +342,7 @@ def fit_dann(
         best_lam, best_arch = best_cfg
         model, err = _fit_dann_single(
             X_tr_s, y_tr, X_tgt_s, best_lam, best_arch, epochs_final, batch_size, seed,
+            X_val_s=X_val_s, y_val=y_val, early_stopping_patience=10,
         )
         chosen_lambda, chosen_arch = best_lam, best_arch
     else:
@@ -377,9 +388,12 @@ def fit_dann(
 
 def _fit_cdan_single(
     X_tr_s, y_tr, X_tgt_s, lambda_, enc_units, epochs, batch_size, seed,
+    X_val_s=None, y_val=None, early_stopping_patience=0,
 ):
     """Train one CDAN candidate; returns (model, None) or (None, error_str)."""
     import tensorflow as tf
+    from tensorflow.keras.callbacks import EarlyStopping
+
     tf.random.set_seed(seed)
     encoder, task, disc = _build_networks(
         X_tr_s.shape[1], seed=seed, task_softmax=False, enc_units=enc_units,
@@ -389,8 +403,15 @@ def _fit_cdan_single(
         Xt=X_tgt_s, lambda_=lambda_, verbose=0, random_state=seed,
         optimizer=tf.keras.optimizers.RMSprop(),
     )
+    fit_kwargs = {"epochs": epochs, "batch_size": batch_size}
+    if early_stopping_patience > 0 and X_val_s is not None:
+        fit_kwargs["validation_data"] = (X_val_s, y_val.astype("float32"))
+        fit_kwargs["callbacks"] = [EarlyStopping(
+            monitor="val_loss", patience=early_stopping_patience,
+            restore_best_weights=True, min_delta=1e-4,
+        )]
     try:
-        model.fit(X_tr_s, y_tr.astype("float32"), epochs=epochs, batch_size=batch_size)
+        model.fit(X_tr_s, y_tr.astype("float32"), **fit_kwargs)
         return model, None
     except Exception as exc:
         return None, str(exc)
@@ -454,6 +475,7 @@ def fit_cdan(
         best_lam, best_arch = best_cfg
         model, err = _fit_cdan_single(
             X_tr_s, y_tr, X_tgt_s, best_lam, best_arch, epochs_final, batch_size, seed,
+            X_val_s=X_val_s, y_val=y_val, early_stopping_patience=10,
         )
         chosen_lambda, chosen_arch = best_lam, best_arch
     else:
