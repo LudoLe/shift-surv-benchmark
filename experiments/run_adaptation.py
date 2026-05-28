@@ -64,8 +64,8 @@ import numpy as np
 from scipy import stats as sp_stats
 
 from generator.scenarios import generate_scenario, SCENARIO_NAMES
-from experiments.baselines import fit_invariant_oracle, fit_all_observed, fit_all_observed_mlp, fit_prior_recalib
-from experiments.adaptation_methods import fit_coral, fit_dann, fit_cdan, fit_irm
+from experiments.baselines import fit_invariant_oracle, fit_all_observed, fit_prior_recalib
+from experiments.adaptation_methods import fit_coral, fit_dann, fit_cdan
 from utils.io import save_table_csv
 
 _TABLES = _ROOT / "outputs" / "tables"
@@ -73,13 +73,13 @@ _TABLES = _ROOT / "outputs" / "tables"
 CORE_SCENARIOS = [
     "no_shift",
     "covariate_shift",
+    "observational_shift",
     "spurious_shift",
     "baseline_hazard_shift",
     "concept_shift",
+    "shape_shift",
 ]
 APPENDIX_SCENARIOS = [
-    "observational_shift",
-    "shape_shift",
     "strong_covariate_shift",
     "cure_shift",
 ]
@@ -90,10 +90,8 @@ _DISPLAY = {
     "all_observed":     "lr_erm",
     "coral":            "coral",
     "prior_recalib":    "prior_recalib",
-    "all_observed_mlp": "mlp_erm",
     "dann":             "dann",
     "cdan":             "cdan",
-    "irm":              "irm",
 }
 
 
@@ -107,7 +105,6 @@ def _run_one(
     n_per_domain: int,
     n_source_domains: int,
     use_iwcv: bool,
-    include_irm: bool,
     nl_strength: float,
     lambda_grid: list | None,
     arch_grid: list | None,
@@ -142,8 +139,6 @@ def _run_one(
             arch_grid=arch_grid,
         ),
     ]
-    if include_irm:
-        results.append(fit_irm(src, tgt, seed=seed))
 
     flat_rows = [_flatten(r, scenario, seed) for r in results]
 
@@ -381,7 +376,6 @@ def run_adaptation(
     n_per_domain: int = 500,
     n_source_domains: int = 1,
     use_iwcv: bool = True,
-    include_irm: bool = False,
     nl_strength: float = 0.0,
     out_prefix: str = "benchmark_1s1t",
     lambda_grid: list | None = None,
@@ -399,8 +393,6 @@ def run_adaptation(
         seeds = list(range(10))
 
     methods = ["invariant_oracle", "all_observed", "coral", "prior_recalib", "dann", "cdan"]
-    if include_irm:
-        methods.append("irm")
 
     all_rows:  list[dict] = []
     all_hp:    list[dict] = []
@@ -417,7 +409,6 @@ def run_adaptation(
                 sc, seed, n_per_domain,
                 n_source_domains=n_source_domains,
                 use_iwcv=use_iwcv,
-                include_irm=include_irm,
                 nl_strength=nl_strength,
                 lambda_grid=lambda_grid,
                 arch_grid=arch_grid,
@@ -479,10 +470,6 @@ if __name__ == "__main__":
         help="Append strong_covariate_shift and cure_shift to the scenario list.",
     )
     parser.add_argument(
-        "--include_irm", action="store_true",
-        help="Include IRM in the method set.",
-    )
-    parser.add_argument(
         "--n_source_domains", type=int, default=1,
         help="Number of source domains (1 = benchmark default).",
     )
@@ -532,7 +519,6 @@ if __name__ == "__main__":
         n_per_domain=args.n,
         n_source_domains=args.n_source_domains,
         use_iwcv=args.use_iwcv,
-        include_irm=args.include_irm,
         nl_strength=args.nl_strength,
         out_prefix=args.out_prefix,
         verbose=not args.quiet,
