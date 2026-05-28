@@ -28,6 +28,7 @@ from .base_generator import SyntheticGenerator, DomainDataset
 SCENARIO_NAMES = [
     "no_shift",
     "covariate_shift",
+    "observational_shift",
     "spurious_shift",
     "baseline_hazard_shift",
     "concept_shift",
@@ -84,6 +85,8 @@ def generate_scenario(
         source_p, target_p = _no_shift(source_params, target_id, n_per_domain)
     elif name == "covariate_shift":
         source_p, target_p = _covariate_shift(source_params, target_id, n_per_domain, base, seed, **kwargs)
+    elif name == "observational_shift":
+        source_p, target_p = _observational_shift(source_params, target_id, n_per_domain, base, seed, **kwargs)
     elif name == "spurious_shift":
         source_p, target_p = _spurious_shift(source_params, target_id, n_per_domain, base, seed, **kwargs)
     elif name == "baseline_hazard_shift":
@@ -138,58 +141,78 @@ def _covariate_shift(
     mu_inv_shift_scale: float = 1.5,
     mu_spu_shift_scale: float = 1.5,
     sigma_noise_target: float = 0.8,
-    a_inv_rotation_angle: float = np.pi / 3,   # 60 degrees
 ) -> tuple[list[DomainParams], DomainParams]:
     """
-    Measurement-induced observational covariate shift.
+    Pure covariate shift — only the latent means shift, A_inv unchanged.
 
-    The core mechanism is a rotation of A_d^(inv) in the target domain.
-    In source, u_inv is observed through A_inv_source; in target through
-    A_inv_target = A_inv_source @ R, where R is a fixed Givens rotation of
-    60° in the (0, 1) column pair.
+    P(X) shifts rigidly (location shift in latent space), P(Y|u_inv) is
+    identical across domains. Analogous to the two-moons problem: same
+    decision boundary, different region of input space.
 
-    Why this creates consistent AUROC degradation
-    ----------------------------------------------
-    A source-trained linear model on x learns to extract the invariant signal
-    as β* ≈ A_inv_source^{+T} w.  In target it predicts:
-
-        β*^T x_tgt ≈ w^T R u_inv   (rotated prediction)
-
-    instead of the true w^T u_inv.  The correlation between the two is:
-
-        ρ = w^T R w / ‖w‖²
-
-    For w = [1.0, 0.5, -0.5] and 60° rotation:  ρ ≈ 0.58
-    This gives a consistent, seed-stable AUROC gap of ~0.10–0.15.
-
-    The invariant oracle (uses u_inv directly) is unaffected by A changes,
-    confirming that the risk mechanism itself is preserved.
-
-    Why prevalence is stable
-    ------------------------
-    mu_inv_target is kept orthogonal to w, so w^T mu_inv = 0 and the mean
-    log-risk η is identical to source regardless of seed.
-
-    This regime is more accurately described as "measurement-induced covariate
-    shift": the same underlying biology is expressed differently across centers
-    (different assays / lab pipelines), while the true hazard model is invariant.
+    mu_inv is shifted orthogonally to w so that mean(eta) is unchanged
+    and prevalence is stable across source and target.
     """
     rng = np.random.default_rng(seed + 10)
 
-    # Source domains: small random mean shifts for realistic inter-center diversity
     for sp in source_params:
         sp.mu_inv = rng.standard_normal(base.k_inv) * 0.3
         sp.mu_spu = rng.standard_normal(base.k_spu) * 0.3
         sp.sigma_noise = 0.5 + rng.uniform(-0.1, 0.1)
 
-    # Fixed mu_inv shift direction: orthogonal to w → w^T mu_inv = 0 → stable prevalence
+    # Shift direction orthogonal to w → w^T mu_inv = 0 → stable prevalence
     w_src = source_params[0].w.copy()
     d = np.ones(base.k_inv, dtype=float)
     d -= (np.dot(d, w_src) / np.dot(w_src, w_src)) * w_src
     d /= np.linalg.norm(d) + 1e-8
 
-    # Fixed Givens rotation R in the (0, 1) column pair of A_inv
-    # x_tgt = A_inv_src @ R @ u_inv + ...  → source model predicts w^T R u_inv
+    target = source_params[0].copy()
+    target.domain_id = target_id
+    target.n = n
+    target.mu_inv = d * mu_inv_shift_scale
+    target.mu_spu = np.ones(base.k_spu) * mu_spu_shift_scale
+    target.sigma_noise = sigma_noise_target
+    # A_inv unchanged: same measurement model, different population location
+
+    return source_params, target
+
+
+def _observational_shift(
+    source_params: list[DomainParams],
+    target_id: int,
+    n: int,
+    base: BaseParams,
+    seed: int,
+    mu_inv_shift_scale: float = 1.5,
+    mu_spu_shift_scale: float = 1.5,
+    sigma_noise_target: float = 0.8,
+    a_inv_rotation_angle: float = np.pi / 3,   # 60 degrees
+) -> tuple[list[DomainParams], DomainParams]:
+    """
+    Measurement-induced observational shift — A_inv rotated in the target.
+
+    The same underlying biology (u_inv, w, lambda0) is expressed differently
+    across centers due to different measurement protocols (assays, lab
+    pipelines). Formally: A_inv_target = A_inv_source @ R where R is a
+    Givens rotation of 60° in the (0,1) column pair.
+
+    A source-trained LR predicts w^T R u_inv instead of w^T u_inv.
+    The correlation between the two is ρ = w^T R w / ||w||² ≈ 0.58 for
+    w=[1, 0.5, -0.5] and 60°, giving a consistent AUROC gap of ~0.10-0.15.
+
+    The invariant oracle is unaffected (uses u_inv directly, bypasses A).
+    """
+    rng = np.random.default_rng(seed + 10)
+
+    for sp in source_params:
+        sp.mu_inv = rng.standard_normal(base.k_inv) * 0.3
+        sp.mu_spu = rng.standard_normal(base.k_spu) * 0.3
+        sp.sigma_noise = 0.5 + rng.uniform(-0.1, 0.1)
+
+    w_src = source_params[0].w.copy()
+    d = np.ones(base.k_inv, dtype=float)
+    d -= (np.dot(d, w_src) / np.dot(w_src, w_src)) * w_src
+    d /= np.linalg.norm(d) + 1e-8
+
     c, s = np.cos(a_inv_rotation_angle), np.sin(a_inv_rotation_angle)
     R = np.eye(base.k_inv, dtype=float)
     R[0, 0], R[0, 1] = c, -s
@@ -198,12 +221,10 @@ def _covariate_shift(
     target = source_params[0].copy()
     target.domain_id = target_id
     target.n = n
-    target.mu_inv = d * mu_inv_shift_scale          # orthogonal to w: mean η unchanged
-    target.mu_spu = np.ones(base.k_spu) * mu_spu_shift_scale   # widens x gap; v=0 never touches η
+    target.mu_inv = d * mu_inv_shift_scale
+    target.mu_spu = np.ones(base.k_spu) * mu_spu_shift_scale
     target.sigma_noise = sigma_noise_target
-    # Rotate the invariant loading: same biology, different measurement
     target.A_inv = source_params[0].A_inv @ R
-    # Outcome mechanism unchanged: beta0, w, v, lambda0, nu all copied from source
 
     return source_params, target
 
