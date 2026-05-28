@@ -79,6 +79,7 @@ CORE_SCENARIOS = [
 ]
 APPENDIX_SCENARIOS = [
     "observational_shift",
+    "shape_shift",
     "strong_covariate_shift",
     "cure_shift",
 ]

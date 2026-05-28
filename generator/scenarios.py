@@ -31,6 +31,7 @@ SCENARIO_NAMES = [
     "observational_shift",
     "spurious_shift",
     "baseline_hazard_shift",
+    "shape_shift",
     "concept_shift",
     "strong_covariate_shift",
     "cure_shift",
@@ -91,6 +92,8 @@ def generate_scenario(
         source_p, target_p = _spurious_shift(source_params, target_id, n_per_domain, base, seed, **kwargs)
     elif name == "baseline_hazard_shift":
         source_p, target_p = _baseline_hazard_shift(source_params, target_id, n_per_domain, **kwargs)
+    elif name == "shape_shift":
+        source_p, target_p = _shape_shift(source_params, target_id, n_per_domain, **kwargs)
     elif name == "concept_shift":
         source_p, target_p = _concept_shift(source_params, target_id, n_per_domain, base, **kwargs)
     elif name == "strong_covariate_shift":
@@ -341,6 +344,51 @@ def _baseline_hazard_shift(
     target.nu = nu_target
     # Covariate distribution and risk coefficients unchanged:
     # mu_inv, mu_spu, A, sigma_noise, w, v all copied from source[0]
+
+    return source_params, target
+
+
+def _shape_shift(
+    source_params: list[DomainParams],
+    target_id: int,
+    n: int,
+    nu_target: float = 0.7,
+) -> tuple[list[DomainParams], DomainParams]:
+    """
+    Weibull shape shift — nu varies, lambda0 and everything else fixed.
+
+    nu controls the shape of the hazard over time:
+      nu > 1 : increasing hazard (source default: 1.5)
+      nu = 1 : constant hazard (exponential)
+      nu < 1 : decreasing hazard (target default: 0.7)
+
+    With nu_target=0.7 the target hazard is decreasing — patients who survive
+    the early period face a lower risk later. This is qualitatively different
+    from the source (increasing hazard) and cannot be corrected by any method
+    that only aligns P(X) or adjusts the intercept.
+
+    The latent ranking w^T u_inv is preserved, but the mapping from risk score
+    to event probability at horizon tau changes non-linearly. A source-trained
+    model uses the wrong shape assumption, miscalibrating predictions even when
+    discrimination (AUROC) is partially preserved.
+
+    lambda0 is adjusted so that source and target have similar prevalence:
+    same mean eta, same tau, but different nu → adjust lambda0 to compensate.
+    """
+    for sp in source_params:
+        sp.nu = 1.5
+        sp.lambda0 = 0.02
+
+    target = source_params[0].copy()
+    target.domain_id = target_id
+    target.n = n
+    target.nu = nu_target
+    # Adjust lambda0 so prevalence stays roughly comparable:
+    # P(T<=tau) = 1 - exp(-lambda0 * tau^nu * exp(mean_eta))
+    # mean_eta ~ 0 for zero-mean latents → exp(mean_eta) ~ 1
+    # Solve: lambda0_tgt * tau^nu_tgt = lambda0_src * tau^nu_src
+    tau = 6.0
+    target.lambda0 = 0.02 * (tau ** 1.5) / (tau ** nu_target)
 
     return source_params, target
 
