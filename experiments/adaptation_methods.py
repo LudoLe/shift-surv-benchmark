@@ -67,7 +67,7 @@ _CDAN_LAMBDA  = 0.1
 # IWCV grid-search defaults
 _DANN_EPOCHS_SEARCH  = 30    # epochs per candidate during HP search
 _DANN_EPOCHS_FINAL   = 100   # epochs for final retraining of best config
-_DEFAULT_LAMBDA_GRID = [0.1, 0.3, 1.0]
+_DEFAULT_LAMBDA_GRID = [0.001, 0.01, 0.1, 0.3, 1.0]
 _DEFAULT_ARCH_GRID   = [(32, 16), (64, 32)]
 
 
