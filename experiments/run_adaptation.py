@@ -554,6 +554,111 @@ def run_adaptation(
 
 
 # ---------------------------------------------------------------------------
+# N-sweep: AUROC vs n_per_domain
+# ---------------------------------------------------------------------------
+
+def run_n_sweep(
+    n_values: list[int],
+    scenarios: list[str] = CORE_SCENARIOS,
+    seeds: list[int] | None = None,
+    use_iwcv: bool = True,
+    nl_strength: float = 0.0,
+    out_prefix: str = "n_sweep",
+    verbose: bool = True,
+) -> None:
+    """
+    Run the full benchmark at each value in *n_values* and save:
+      - one raw/summary/compact CSV per n  (prefix_n<n>_*.csv)
+      - one aggregated plot: AUROC vs n, per method, per scenario
+    """
+    methods = ["invariant_oracle", "all_observed", "coral", "prior_recalib", "dann", "cdan"]
+    sweep_agg: dict[int, list[dict]] = {}
+
+    for n in n_values:
+        if verbose:
+            print(f"\n{'='*60}\n  n = {n}\n{'='*60}", flush=True)
+        result = run_adaptation(
+            scenarios=scenarios,
+            seeds=seeds,
+            n_per_domain=n,
+            use_iwcv=use_iwcv,
+            nl_strength=nl_strength,
+            out_prefix=f"{out_prefix}_n{n}",
+            verbose=verbose,
+        )
+        sweep_agg[n] = result["aggregated"]
+
+    _plot_n_sweep(sweep_agg, scenarios, methods, out_prefix)
+
+
+def _plot_n_sweep(
+    sweep_agg: dict[int, list[dict]],
+    scenarios: list[str],
+    methods: list[str],
+    out_prefix: str,
+) -> None:
+    """AUROC vs n per scenario (one subplot each), one line per method."""
+    n_values = sorted(sweep_agg.keys())
+    colors = {
+        "invariant_oracle": "black",
+        "all_observed":     "steelblue",
+        "coral":            "seagreen",
+        "prior_recalib":    "goldenrod",
+        "dann":             "tomato",
+        "cdan":             "orchid",
+    }
+    n_sc = len(scenarios)
+    ncols = min(4, n_sc)
+    nrows = (n_sc + ncols - 1) // ncols
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 4 * nrows), sharey=False)
+    axes = np.array(axes).flatten()
+
+    for ax_i, sc in enumerate(scenarios):
+        ax = axes[ax_i]
+        for m in methods:
+            lbl = _DISPLAY.get(m, m)
+            means, cis = [], []
+            for n in n_values:
+                row = next((r for r in sweep_agg[n] if r["scenario"] == sc and r["method"] == m), None)
+                if row:
+                    means.append(float(row.get("tgt_auroc_mean", float("nan"))))
+                    cis.append(float(row.get("tgt_auroc_ci95", 0.0)))
+                else:
+                    means.append(float("nan"))
+                    cis.append(0.0)
+            means = np.array(means)
+            cis   = np.array(cis)
+            ax.plot(n_values, means, marker="o", color=colors.get(m, "gray"),
+                    linewidth=1.8, label=lbl)
+            ax.fill_between(n_values, means - cis, means + cis,
+                            alpha=0.12, color=colors.get(m, "gray"))
+        ax.set_title(sc.replace("_", " "), fontsize=10)
+        ax.set_xlabel("n per domain")
+        ax.set_ylabel("Target AUROC")
+        ax.set_xscale("log")
+        ax.set_xticks(n_values)
+        ax.set_xticklabels([str(n) for n in n_values])
+
+    # hide unused subplots
+    for ax_i in range(len(scenarios), len(axes)):
+        axes[ax_i].set_visible(False)
+
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=len(methods),
+               fontsize=9, bbox_to_anchor=(0.5, -0.02))
+    fig.suptitle("Target AUROC vs n per domain  (mean ± 95% CI)", fontsize=13)
+    plt.tight_layout(rect=[0, 0.04, 1, 1])
+
+    _FIGURES = _ROOT / "outputs" / "figures"
+    _FIGURES.mkdir(parents=True, exist_ok=True)
+    out_path = _FIGURES / f"{out_prefix}_auroc_vs_n.png"
+    plt.savefig(out_path, dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {out_path}")
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
@@ -607,6 +712,12 @@ if __name__ == "__main__":
         "--quiet", action="store_true",
         help="Suppress verbose output.",
     )
+    parser.add_argument(
+        "--n_sweep", type=str, default=None, metavar="N1,N2,...",
+        help="Comma-separated list of n_per_domain values to sweep over. "
+             "Runs the full benchmark at each n and produces an AUROC-vs-n plot. "
+             "Example: --n_sweep 250,500,1000,2000",
+    )
     args = parser.parse_args()
 
     scenarios = list(args.scenarios) if args.scenarios else list(CORE_SCENARIOS)
@@ -615,13 +726,25 @@ if __name__ == "__main__":
 
     seeds = list(range(args.seed_start, args.seed_start + args.n_seeds))
 
-    run_adaptation(
-        scenarios=scenarios,
-        seeds=seeds,
-        n_per_domain=args.n,
-        n_source_domains=args.n_source_domains,
-        use_iwcv=args.use_iwcv,
-        nl_strength=args.nl_strength,
-        out_prefix=args.out_prefix,
-        verbose=not args.quiet,
-    )
+    if args.n_sweep:
+        n_values = [int(x.strip()) for x in args.n_sweep.split(",")]
+        run_n_sweep(
+            n_values=n_values,
+            scenarios=scenarios,
+            seeds=seeds,
+            use_iwcv=args.use_iwcv,
+            nl_strength=args.nl_strength,
+            out_prefix=args.out_prefix,
+            verbose=not args.quiet,
+        )
+    else:
+        run_adaptation(
+            scenarios=scenarios,
+            seeds=seeds,
+            n_per_domain=args.n,
+            n_source_domains=args.n_source_domains,
+            use_iwcv=args.use_iwcv,
+            nl_strength=args.nl_strength,
+            out_prefix=args.out_prefix,
+            verbose=not args.quiet,
+        )
