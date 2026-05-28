@@ -335,6 +335,7 @@ def fit_dann(
             for arch in a_grid:
                 m, err, _ = _fit_dann_single(
                     X_tr_s, y_tr, X_tgt_s, lam, arch, epochs_search, batch_size, seed,
+                    X_val_s=X_val_s, y_val=y_val, early_stopping_patience=5,
                 )
                 if m is None:
                     score = float("nan")
@@ -473,6 +474,7 @@ def fit_cdan(
             for arch in a_grid:
                 m, err, _ = _fit_cdan_single(
                     X_tr_s, y_tr, X_tgt_s, lam, arch, epochs_search, batch_size, seed,
+                    X_val_s=X_val_s, y_val=y_val, early_stopping_patience=5,
                 )
                 if m is None:
                     score = float("nan")
