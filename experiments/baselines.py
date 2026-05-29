@@ -26,7 +26,8 @@ Each `fit_*` function returns a dict:
 from __future__ import annotations
 import warnings
 import numpy as np
-from sklearn.calibration import CalibratedClassifierCV, calibration_curve
+from sklearn.calibration import calibration_curve
+from sklearn.isotonic import IsotonicRegression
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
@@ -305,14 +306,10 @@ def _fit_posthoc_calib(
 
     Protocol:
       1. Train LR on 80% of pooled source (train split).
-      2. Fit calibrator on the held-out 20% source val using CalibratedClassifierCV
-         with cv='prefit'.
-      3. Apply calibrated model to target (no target labels used).
-
-    This tests whether calibration learned on source val transfers to the target.
-    Under covariate shift the marginal P(X) changes, so the isotonic/sigmoid
-    calibration map may not hold.  The comparison against DANN/CDAN ECE is the
-    scientific point: post-hoc source-calibration vs. adversarial self-calibration.
+      2. Get raw probabilities on held-out 20% source val.
+      3. Fit calibrator on (raw_probs_val, y_val) — Platt = 1-D logistic,
+         isotonic = IsotonicRegression.
+      4. Apply to target raw probs (no target labels used).
     """
     X_all, y_all = _pool_sources(source_datasets, "x")
     X_tr, X_val, y_tr, y_val = train_test_split(
@@ -329,11 +326,26 @@ def _fit_posthoc_calib(
         warnings.filterwarnings("ignore", category=ConvergenceWarning)
         base_lr.fit(X_tr_s, y_tr)
 
-    calibrated = CalibratedClassifierCV(base_lr, cv="prefit", method=calib_method)
-    calibrated.fit(X_val_s, y_val)
+    p_val_raw = base_lr.predict_proba(X_val_s)[:, 1]
+    p_tgt_raw = base_lr.predict_proba(X_tgt_s)[:, 1]
 
-    def _sc(y, X_scaled):
-        p = calibrated.predict_proba(X_scaled)[:, 1]
+    if calib_method == "sigmoid":
+        # Platt scaling: 1-D logistic regression on raw probabilities
+        platt = LogisticRegression(C=1e6, solver="lbfgs", max_iter=1000, random_state=0)
+        platt.fit(p_val_raw.reshape(-1, 1), y_val)
+        p_val_c = platt.predict_proba(p_val_raw.reshape(-1, 1))[:, 1]
+        p_tgt_c = platt.predict_proba(p_tgt_raw.reshape(-1, 1))[:, 1]
+        calibrator = platt
+        feature_set = "platt_scaling"
+    else:
+        iso = IsotonicRegression(out_of_bounds="clip")
+        iso.fit(p_val_raw, y_val)
+        p_val_c = iso.predict(p_val_raw)
+        p_tgt_c = iso.predict(p_tgt_raw)
+        calibrator = iso
+        feature_set = "isotonic"
+
+    def _sc(y, p):
         return {
             "auroc":       round(auroc(y, p), 4),
             "auprc":       round(auprc(y, p), 4),
@@ -345,20 +357,20 @@ def _fit_posthoc_calib(
             "n":           len(y),
         }
 
-    feature_set = "platt_scaling" if calib_method == "sigmoid" else "isotonic"
     source_scores = {}
     for ds in source_datasets:
-        X_d = scaler.transform(ds.x)
-        source_scores[f"source_d{ds.domain_id}"] = _sc(ds.y, X_d)
+        p_d_raw = base_lr.predict_proba(scaler.transform(ds.x))[:, 1]
+        p_d_c   = (calibrator.predict_proba(p_d_raw.reshape(-1, 1))[:, 1]
+                   if calib_method == "sigmoid" else calibrator.predict(p_d_raw))
+        source_scores[f"source_d{ds.domain_id}"] = _sc(ds.y, p_d_c)
 
-    tgt_probs = calibrated.predict_proba(X_tgt_s)[:, 1]
     return {
         "feature_set":    feature_set,
         "source_domains": source_scores,
-        "source_pooled":  _sc(y_val, X_val_s),
-        "target":         _sc(target_dataset.y, X_tgt_s),
-        "target_probs":   tgt_probs,
-        "model":          calibrated,
+        "source_pooled":  _sc(y_val, p_val_c),
+        "target":         _sc(target_dataset.y, p_tgt_c),
+        "target_probs":   p_tgt_c,
+        "model":          calibrator,
         "scaler":         scaler,
     }
 
