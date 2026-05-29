@@ -184,6 +184,7 @@ def fit_coral(
         "source_domains": source_scores,
         "source_pooled":  _score(y_val, probs_val, len(y_val)),
         "target":         _score(target_dataset.y, probs_tgt, target_dataset.n),
+        "target_probs":   probs_tgt,
         "model":          model,
         "scaler":         scaler,
     }
@@ -383,6 +384,7 @@ def fit_dann(
         "source_domains": source_scores,
         "source_pooled":  _score(y_val, probs_val, len(y_val)),
         "target":         _score(target_dataset.y, probs_tgt, target_dataset.n),
+        "target_probs":   probs_tgt,
         "model":          model,
         "scaler":         scaler,
         "hp":             {"lambda": chosen_lambda, "arch": chosen_arch, "hp_rows": hp_rows},
@@ -522,6 +524,7 @@ def fit_cdan(
         "source_domains": source_scores,
         "source_pooled":  _score(y_val, probs_val, len(y_val)),
         "target":         _score(target_dataset.y, probs_tgt, target_dataset.n),
+        "target_probs":   probs_tgt,
         "model":          model,
         "scaler":         scaler,
         "hp":             {"lambda": chosen_lambda, "arch": chosen_arch, "hp_rows": hp_rows},

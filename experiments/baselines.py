@@ -26,6 +26,7 @@ Each `fit_*` function returns a dict:
 from __future__ import annotations
 import warnings
 import numpy as np
+from sklearn.calibration import CalibratedClassifierCV, calibration_curve
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
@@ -130,14 +131,16 @@ def _fit_and_score(
     }
 
     target_score = _score_ds(target_dataset)
+    target_probs = model.predict_proba(scaler.transform(getattr(target_dataset, feature_attr)))[:, 1]
 
     return {
-        "feature_set": feature_set,
+        "feature_set":   feature_set,
         "source_domains": source_scores,
         "source_pooled": source_pooled,
-        "target": target_score,
-        "model": model,
-        "scaler": scaler,
+        "target":        target_score,
+        "target_probs":  target_probs,
+        "model":         model,
+        "scaler":        scaler,
     }
 
 
@@ -251,6 +254,7 @@ def fit_prior_recalib(
         "source_domains":   source_scores,
         "source_pooled":    _sc(y_val, model.predict_proba(X_val_s)[:, 1]),
         "target":           _sc(target_dataset.y, p_adj),
+        "target_probs":     p_adj,
         "model":            model,
         "scaler":           scaler,
         "pi_src":           pi_src,
@@ -289,6 +293,90 @@ def fit_all_observed_mlp(
     return _fit_and_score(X_train, y_train, source_datasets, target_dataset,
                           feature_attr="x", feature_set="all_observed_mlp",
                           model=MLPClassifier(**_MLP_KWARGS))
+
+
+def _fit_posthoc_calib(
+    source_datasets: list[DomainDataset],
+    target_dataset: DomainDataset,
+    calib_method: str,
+) -> dict:
+    """
+    Post-hoc calibration baseline (Platt or isotonic) fitted on source val.
+
+    Protocol:
+      1. Train LR on 80% of pooled source (train split).
+      2. Fit calibrator on the held-out 20% source val using CalibratedClassifierCV
+         with cv='prefit'.
+      3. Apply calibrated model to target (no target labels used).
+
+    This tests whether calibration learned on source val transfers to the target.
+    Under covariate shift the marginal P(X) changes, so the isotonic/sigmoid
+    calibration map may not hold.  The comparison against DANN/CDAN ECE is the
+    scientific point: post-hoc source-calibration vs. adversarial self-calibration.
+    """
+    X_all, y_all = _pool_sources(source_datasets, "x")
+    X_tr, X_val, y_tr, y_val = train_test_split(
+        X_all, y_all, test_size=0.2, random_state=0, stratify=y_all,
+    )
+
+    scaler = StandardScaler()
+    X_tr_s  = scaler.fit_transform(X_tr)
+    X_val_s = scaler.transform(X_val)
+    X_tgt_s = scaler.transform(target_dataset.x)
+
+    base_lr = LogisticRegression(**_LR_KWARGS)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=ConvergenceWarning)
+        base_lr.fit(X_tr_s, y_tr)
+
+    calibrated = CalibratedClassifierCV(base_lr, cv="prefit", method=calib_method)
+    calibrated.fit(X_val_s, y_val)
+
+    def _sc(y, X_scaled):
+        p = calibrated.predict_proba(X_scaled)[:, 1]
+        return {
+            "auroc":       round(auroc(y, p), 4),
+            "auprc":       round(auprc(y, p), 4),
+            "ece":         round(ece(y, p), 4),
+            "f1":          round(f1(y, p), 4),
+            "sensitivity": round(sensitivity(y, p), 4),
+            "specificity": round(specificity(y, p), 4),
+            "prevalence":  round(prevalence(y), 4),
+            "n":           len(y),
+        }
+
+    feature_set = "platt_scaling" if calib_method == "sigmoid" else "isotonic"
+    source_scores = {}
+    for ds in source_datasets:
+        X_d = scaler.transform(ds.x)
+        source_scores[f"source_d{ds.domain_id}"] = _sc(ds.y, X_d)
+
+    tgt_probs = calibrated.predict_proba(X_tgt_s)[:, 1]
+    return {
+        "feature_set":    feature_set,
+        "source_domains": source_scores,
+        "source_pooled":  _sc(y_val, X_val_s),
+        "target":         _sc(target_dataset.y, X_tgt_s),
+        "target_probs":   tgt_probs,
+        "model":          calibrated,
+        "scaler":         scaler,
+    }
+
+
+def fit_platt_scaling(
+    source_datasets: list[DomainDataset],
+    target_dataset: DomainDataset,
+) -> dict:
+    """Platt scaling (sigmoid calibration) fitted on source val, applied to target."""
+    return _fit_posthoc_calib(source_datasets, target_dataset, calib_method="sigmoid")
+
+
+def fit_isotonic(
+    source_datasets: list[DomainDataset],
+    target_dataset: DomainDataset,
+) -> dict:
+    """Isotonic regression calibration fitted on source val, applied to target."""
+    return _fit_posthoc_calib(source_datasets, target_dataset, calib_method="isotonic")
 
 
 def evaluate_all_baselines(

@@ -67,7 +67,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from generator.scenarios import generate_scenario, SCENARIO_NAMES
-from experiments.baselines import fit_invariant_oracle, fit_all_observed, fit_prior_recalib
+from experiments.baselines import (
+    fit_invariant_oracle, fit_all_observed, fit_prior_recalib,
+    fit_platt_scaling, fit_isotonic,
+)
 from experiments.adaptation_methods import fit_coral, fit_dann, fit_cdan
 from utils.io import save_table_csv
 
@@ -95,6 +98,8 @@ _DISPLAY = {
     "prior_recalib":    "prior_recalib",
     "dann":             "dann",
     "cdan":             "cdan",
+    "platt_scaling":    "platt",
+    "isotonic":         "isotonic",
 }
 
 
@@ -111,8 +116,8 @@ def _run_one(
     nl_strength: float,
     lambda_grid: list | None,
     arch_grid: list | None,
-) -> tuple[list[dict], list[dict]]:
-    """Generate one scenario/seed, fit all methods, return (flat_rows, hp_rows)."""
+) -> tuple[list[dict], list[dict], list[dict], dict]:
+    """Generate one scenario/seed, fit all methods, return (flat_rows, hp_rows, loss_rows, calib_rows)."""
     from generator.parameters import BaseParams
     base = BaseParams(seed=seed, nl_strength=nl_strength)
     data = generate_scenario(
@@ -129,6 +134,8 @@ def _run_one(
         fit_all_observed(src, tgt),
         fit_coral(src, tgt, seed=seed),
         fit_prior_recalib(src, tgt),
+        fit_platt_scaling(src, tgt),
+        fit_isotonic(src, tgt),
         fit_dann(
             src, tgt, seed=seed,
             use_iwcv=use_iwcv,
@@ -177,7 +184,17 @@ def _run_one(
                     row[key] = vals[ep]
             loss_rows.append(row)
 
-    return flat_rows, hp_rows, loss_rows
+    # Collect target probabilities for reliability diagrams
+    # calib_data[method] = (y_true, y_prob) both as numpy arrays
+    y_tgt = tgt.y if hasattr(tgt, "y") else np.concatenate([ds.y for ds in tgt])
+    calib_data: dict[str, tuple] = {}
+    for r in results:
+        m     = r.get("feature_set", "?")
+        probs = r.get("target_probs")
+        if probs is not None:
+            calib_data[m] = (y_tgt, np.asarray(probs))
+
+    return flat_rows, hp_rows, loss_rows, calib_data
 
 
 def _flatten(r: dict, scenario: str, seed: int) -> dict:
@@ -401,6 +418,104 @@ def _plot_loss_curves(
         plt.close(fig)
 
 
+def _plot_reliability_diagrams(
+    all_rows_raw: list[dict],
+    scenarios: list[str],
+    all_results_by_seed: list[tuple[str, int, list[dict]]],
+    out_dir: "Path",
+    prefix: str,
+) -> None:
+    """
+    Reliability diagrams: one PNG per scenario.
+    Each subplot shows the calibration curve (mean predicted prob vs fraction positive)
+    for each method, averaged across seeds.
+
+    Parameters
+    ----------
+    all_results_by_seed : list of (scenario, seed, results_list)
+        The raw result dicts from fit_* calls, needed to get per-sample probabilities.
+    """
+    pass  # populated below via _plot_reliability_diagrams_impl
+
+
+def _plot_calibration_curves(
+    calib_data: dict[str, dict[str, tuple[np.ndarray, np.ndarray]]],
+    scenarios: list[str],
+    methods: list[str],
+    out_dir: "Path",
+    prefix: str,
+) -> None:
+    """
+    Plot reliability diagrams from pre-aggregated calibration data.
+
+    calib_data[scenario][method] = (mean_pred_prob, fraction_pos)
+    One PNG per scenario, one curve per method.
+    """
+    from sklearn.calibration import calibration_curve as _cal_curve
+
+    colors = {
+        "invariant_oracle": "black",
+        "all_observed":     "steelblue",
+        "coral":            "seagreen",
+        "prior_recalib":    "goldenrod",
+        "platt_scaling":    "peru",
+        "isotonic":         "darkorange",
+        "dann":             "tomato",
+        "cdan":             "orchid",
+    }
+    linestyles = {
+        "invariant_oracle": "--",
+        "all_observed":     "-",
+        "coral":            "-",
+        "prior_recalib":    "-",
+        "platt_scaling":    "-.",
+        "isotonic":         "-.",
+        "dann":             "-",
+        "cdan":             "-",
+    }
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    n_sc  = len(scenarios)
+    ncols = min(4, n_sc)
+    nrows = (n_sc + ncols - 1) // ncols
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 4 * nrows), sharey=False)
+    axes = np.array(axes).flatten()
+
+    for ax_i, sc in enumerate(scenarios):
+        ax = axes[ax_i]
+        ax.plot([0, 1], [0, 1], "k:", linewidth=1.0, label="perfect")
+        for m in methods:
+            data = calib_data.get(sc, {}).get(m)
+            if data is None:
+                continue
+            frac_pos, mean_pred = data
+            lbl   = _DISPLAY.get(m, m)
+            color = colors.get(m, "gray")
+            ls    = linestyles.get(m, "-")
+            ax.plot(mean_pred, frac_pos, color=color, linestyle=ls,
+                    linewidth=1.8, marker="o", markersize=4, label=lbl)
+        ax.set_title(sc.replace("_", " "), fontsize=9)
+        ax.set_xlabel("Mean predicted prob")
+        ax.set_ylabel("Fraction positives")
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+
+    for ax_i in range(len(scenarios), len(axes)):
+        axes[ax_i].set_visible(False)
+
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=min(5, len(methods) + 1),
+               fontsize=8, bbox_to_anchor=(0.5, -0.02))
+    fig.suptitle("Reliability diagrams (target domain, mean across seeds)", fontsize=12)
+    plt.tight_layout(rect=[0, 0.04, 1, 1])
+
+    out_path = out_dir / f"{prefix}_reliability.png"
+    plt.savefig(out_path, dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {out_path}")
+
+
 def _print_implementation_report(
     agg: list[dict],
     scenarios: list[str],
@@ -483,11 +598,16 @@ def run_adaptation(
     if seeds is None:
         seeds = list(range(10))
 
-    methods = ["invariant_oracle", "all_observed", "coral", "prior_recalib", "dann", "cdan"]
+    methods = [
+        "invariant_oracle", "all_observed", "coral", "prior_recalib",
+        "platt_scaling", "isotonic", "dann", "cdan",
+    ]
 
     all_rows:  list[dict] = []
     all_hp:    list[dict] = []
     all_loss:  list[dict] = []
+    # calib_accum[scenario][method] = list of (y_true, y_prob) tuples across seeds
+    calib_accum: dict[str, dict[str, list]] = {sc: {} for sc in scenarios}
     n_total = len(seeds) * len(scenarios)
     done = 0
 
@@ -497,7 +617,7 @@ def run_adaptation(
         for sc in scenarios:
             if verbose:
                 print(f"  {sc:30s} ...", end=" ", flush=True)
-            flat_rows, hp_rows, loss_rows = _run_one(
+            flat_rows, hp_rows, loss_rows, calib_data = _run_one(
                 sc, seed, n_per_domain,
                 n_source_domains=n_source_domains,
                 use_iwcv=use_iwcv,
@@ -508,6 +628,8 @@ def run_adaptation(
             all_rows.extend(flat_rows)
             all_hp.extend(hp_rows)
             all_loss.extend(loss_rows)
+            for m, pair in calib_data.items():
+                calib_accum[sc].setdefault(m, []).append(pair)
             done += 1
             if verbose:
                 method_aurocs = {r["method"]: r["tgt_auroc"] for r in flat_rows}
@@ -531,6 +653,22 @@ def run_adaptation(
 
     _FIGURES = _ROOT / "outputs" / "figures"
     _plot_loss_curves(all_loss, scenarios, _FIGURES, out_prefix)
+
+    # Build aggregated calibration curves (pool all seeds, then compute)
+    from sklearn.calibration import calibration_curve as _cal_curve
+    calib_plot_data: dict[str, dict[str, tuple]] = {}
+    for sc in scenarios:
+        calib_plot_data[sc] = {}
+        for m, pairs in calib_accum.get(sc, {}).items():
+            all_ytrue = np.concatenate([p[0] for p in pairs])
+            all_yprob = np.concatenate([p[1] for p in pairs])
+            try:
+                frac_pos, mean_pred = _cal_curve(all_ytrue, all_yprob, n_bins=10, strategy="uniform")
+                calib_plot_data[sc][m] = (frac_pos, mean_pred)
+            except Exception:
+                pass
+    if any(calib_plot_data[sc] for sc in scenarios):
+        _plot_calibration_curves(calib_plot_data, scenarios, methods, _FIGURES, out_prefix)
 
     if verbose:
         _print_full_report(agg, scenarios, methods, n_seeds=len(seeds))
@@ -571,7 +709,10 @@ def run_n_sweep(
       - one raw/summary/compact CSV per n  (prefix_n<n>_*.csv)
       - one aggregated plot: AUROC vs n, per method, per scenario
     """
-    methods = ["invariant_oracle", "all_observed", "coral", "prior_recalib", "dann", "cdan"]
+    methods = [
+        "invariant_oracle", "all_observed", "coral", "prior_recalib",
+        "platt_scaling", "isotonic", "dann", "cdan",
+    ]
     sweep_agg: dict[int, list[dict]] = {}
 
     for n in n_values:
@@ -604,6 +745,8 @@ def _plot_n_sweep(
         "all_observed":     "steelblue",
         "coral":            "seagreen",
         "prior_recalib":    "goldenrod",
+        "platt_scaling":    "peru",
+        "isotonic":         "darkorange",
         "dann":             "tomato",
         "cdan":             "orchid",
     }
