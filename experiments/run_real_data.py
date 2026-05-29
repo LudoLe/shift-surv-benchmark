@@ -168,6 +168,23 @@ def _run_seed(
         "target": _score(y_tgt, p_adj),
     })
 
+    # --- Platt scaling ---
+    from scipy.optimize import minimize_scalar as _min_scalar
+    logits_val = lr.decision_function(X_val_s)
+    logits_tgt = lr.decision_function(X_tgt_s)
+    def _nll(T):
+        p = 1 / (1 + np.exp(-logits_val / T))
+        p = np.clip(p, 1e-7, 1 - 1e-7)
+        return -np.mean(y_val * np.log(p) + (1 - y_val) * np.log(1 - p))
+    T_opt = _min_scalar(_nll, bounds=(0.01, 10.0), method="bounded").x
+    p_tgt_platt = 1 / (1 + np.exp(-logits_tgt / T_opt))
+    p_val_platt = 1 / (1 + np.exp(-logits_val / T_opt))
+    results.append({
+        "method": "platt_scaling",
+        "source_pooled": _score(y_val, p_val_platt),
+        "target": _score(y_tgt, p_tgt_platt),
+    })
+
     # --- CORAL ---
     from adapt.feature_based import CORAL as _CORAL
     coral = _CORAL(
@@ -231,7 +248,7 @@ def _run_seed(
 
 _METRIC_KEYS = ["src_auroc", "tgt_auroc", "tgt_ece", "tgt_f1",
                 "tgt_sensitivity", "tgt_specificity", "gap"]
-_METHODS     = ["lr_erm", "prior_recalib", "coral", "dann", "cdan"]
+_METHODS     = ["lr_erm", "prior_recalib", "platt_scaling", "coral", "dann", "cdan"]
 
 
 def _flatten_real(r: dict, seed: int) -> dict:
