@@ -100,15 +100,31 @@ def _nan_score(n: int = 0) -> dict:
     return d
 
 
-def _importance_weights(X_src: np.ndarray, X_tgt: np.ndarray) -> np.ndarray:
-    """Domain-classifier importance weights w(x) = P(tgt|x)/P(src|x), clipped to [0.05, 20]."""
+def _importance_weights(
+    X_src: np.ndarray,
+    X_tgt: np.ndarray,
+    X_eval: np.ndarray | None = None,
+) -> np.ndarray:
+    """Domain-classifier importance weights w(x) = P(tgt|x)/P(src|x), clipped to [0.05, 20].
+
+    The domain classifier is trained to separate X_src (label 0) from X_tgt
+    (label 1).  Weights are returned for the points in X_eval; when X_eval is
+    None they are returned for X_src (legacy behaviour).
+
+    Passing X_eval decouples *what the classifier is trained on* from *which
+    points get weighted*.  IWCV requires the weights to align with the
+    validation set being scored, while the classifier is trained on the source
+    train split — so callers pass X_eval=X_val_s.  This also keeps the weights
+    out-of-sample w.r.t. the classifier, avoiding optimistic self-weighting.
+    """
     X = np.vstack([X_src, X_tgt])
     y = np.array([0] * len(X_src) + [1] * len(X_tgt), dtype=float)
     clf = LogisticRegression(C=1.0, max_iter=500, random_state=0, solver="lbfgs")
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=ConvergenceWarning)
         clf.fit(X, y)
-    p_tgt = clf.predict_proba(X_src)[:, 1]
+    X_w = X_src if X_eval is None else X_eval
+    p_tgt = clf.predict_proba(X_w)[:, 1]
     p_src = np.clip(1.0 - p_tgt, 1e-6, None)
     return np.clip(p_tgt / p_src, 0.05, 20.0)
 
@@ -329,7 +345,9 @@ def fit_dann(
     if run_iwcv:
         lam_grid  = lambda_grid if lambda_grid is not None else _DEFAULT_LAMBDA_GRID
         a_grid    = arch_grid   if arch_grid   is not None else _DEFAULT_ARCH_GRID
-        iw        = _importance_weights(X_tr_s, X_tgt_s)
+        # Classifier trained on train vs target; weights evaluated on the val
+        # set that IWCV actually scores (must match len(y_val)).
+        iw        = _importance_weights(X_tr_s, X_tgt_s, X_eval=X_val_s)
         best_score, best_cfg = -1.0, (lam_grid[0], a_grid[0])
         hp_rows = []
         for lam in lam_grid:
@@ -469,7 +487,9 @@ def fit_cdan(
     if run_iwcv:
         lam_grid  = lambda_grid if lambda_grid is not None else _DEFAULT_LAMBDA_GRID
         a_grid    = arch_grid   if arch_grid   is not None else _DEFAULT_ARCH_GRID
-        iw        = _importance_weights(X_tr_s, X_tgt_s)
+        # Classifier trained on train vs target; weights evaluated on the val
+        # set that IWCV actually scores (must match len(y_val)).
+        iw        = _importance_weights(X_tr_s, X_tgt_s, X_eval=X_val_s)
         best_score, best_cfg = -1.0, (lam_grid[0], a_grid[0])
         hp_rows = []
         for lam in lam_grid:
@@ -529,89 +549,6 @@ def fit_cdan(
         "scaler":         scaler,
         "hp":             {"lambda": chosen_lambda, "arch": chosen_arch, "hp_rows": hp_rows},
         "loss_history":   loss_history,
-    }
-
-
-# ---------------------------------------------------------------------------
-# IRM — Invariant Risk Minimization (Arjovsky et al. 2019)
-# ---------------------------------------------------------------------------
-
-def fit_irm(
-    source_datasets: list[DomainDataset],
-    target_dataset: DomainDataset,
-    lam: float = 1e2,
-    n_iter: int = 300,
-    seed: int = 0,
-) -> dict:
-    """
-    IRM: Invariant Risk Minimization (Arjovsky et al. 2019).
-
-    Finds a linear classifier w such that w is simultaneously optimal in every
-    source environment via a gradient penalty:
-
-        min_w  Σ_e CE(X_e w, y_e)  +  λ · Σ_e ||X_e^T(σ(X_e w)-y_e)/n_e||²
-
-    Fixed λ=100 (standard in the IRM literature for tabular data).
-    No inner CV — λ grid search is prohibitively slow at benchmark scale.
-    """
-    from scipy.optimize import minimize
-    from scipy.special import expit
-
-    scaler = StandardScaler()
-    X_all, y_all = _pool_sources(source_datasets)
-    scaler.fit(X_all)
-
-    envs    = [(scaler.transform(ds.x), ds.y.astype(float))
-               for ds in source_datasets]
-    X_tgt_s = scaler.transform(target_dataset.x)
-    y_src_all = np.concatenate([y for _, y in envs])
-    p = envs[0][0].shape[1]
-
-    def _obj_and_grad(w):
-        loss = 0.0
-        grad = np.zeros(p)
-        for X, y in envs:
-            probs = expit(X @ w)
-            r     = probs - y
-            # CE loss
-            loss += float(np.mean(np.log1p(np.exp(-(2*y-1) * (X @ w)))))
-            grad += X.T @ r / len(y)
-            # IRM penalty: ||X^T r / n||²  and its gradient
-            g_env  = X.T @ r / len(y)
-            loss  += lam * float(g_env @ g_env)
-            # d/dw lam*||g||² = 2*lam * J^T g  where J_{kj} = dg_k/dw_j
-            # g_k = Σ_i X_ik*(σ_i-y_i)/n  →  dg_k/dw_j = Σ_i X_ik*X_ij*σ_i(1-σ_i)/n
-            diag_H = probs * (1 - probs)          # (n,)
-            JtG    = (X.T * diag_H) @ (X @ g_env) / len(y)
-            grad  += 2.0 * lam * JtG
-        return loss / len(envs), grad / len(envs)
-
-    rng = np.random.default_rng(seed)
-    w0  = rng.standard_normal(p) * 0.01
-    res = minimize(_obj_and_grad, w0, jac=True, method="L-BFGS-B",
-                   options={"maxiter": n_iter, "ftol": 1e-8, "gtol": 1e-5})
-    w_opt = res.x
-
-    # Intercept from pooled source prevalence
-    b_opt = float(np.log(y_src_all.mean() / (1 - y_src_all.mean() + 1e-8)))
-
-    def _predict(X):
-        return expit(X @ w_opt + b_opt)
-
-    source_scores = {}
-    for ds in source_datasets:
-        X_d = scaler.transform(ds.x)
-        source_scores[f"source_d{ds.domain_id}"] = _score(ds.y, _predict(X_d), ds.n)
-
-    X_src_pool = np.vstack([X for X, _ in envs])
-
-    return {
-        "feature_set":    "irm",
-        "source_domains": source_scores,
-        "source_pooled":  _score(y_src_all, _predict(X_src_pool), len(y_src_all)),
-        "target":         _score(target_dataset.y, _predict(X_tgt_s), target_dataset.n),
-        "model":          {"w": w_opt, "b": b_opt, "lam": lam},
-        "scaler":         scaler,
     }
 
 

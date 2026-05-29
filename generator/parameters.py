@@ -7,7 +7,7 @@ Notation follows Section 4 of the paper:
 Observation model
 -----------------
 Invariant and spurious latent factors are projected into observed covariate
-space through *separate* loading matrices, with an optional quadratic nonlinear
+space through *separate* loading matrices, with an optional tanh nonlinear
 observation component:
 
     x_{i,d} = A_d^(inv) u_{i,d}^(inv)
@@ -17,7 +17,7 @@ observation component:
 
   A_d^(inv)  : (p × k_inv) — maps invariant factors to observed features
   A_d^(spu)  : (p × k_spu) — maps spurious factors to observed features
-  B_d^(nl)   : (p × k_inv) — maps squared invariant factors; column-normalised
+  B_d^(nl)   : (p × k_inv) — maps tanh(invariant factors); column-normalised
   α          : scalar nonlinearity strength (BaseParams.nl_strength)
   ε_{i,d}    ~ N(0, σ_d² I_p) — observation noise
 
@@ -159,7 +159,7 @@ def make_shared_loading_matrices(
 
       A_inv : (p × k_inv) — invariant factor → observed feature projection
       A_spu : (p × k_spu) — spurious factor → observed feature projection
-      B_nl  : (p × k_inv) — squared invariant factor → observed feature
+      B_nl  : (p × k_inv) — tanh(invariant factor) → observed feature
               projection (nonlinear term); None when base.nl_strength == 0.
 
     A_inv and A_spu are drawn from a single RNG stream (identical to the

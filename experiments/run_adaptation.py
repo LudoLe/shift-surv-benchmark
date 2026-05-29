@@ -4,28 +4,28 @@ Phase-2 experiment runner: domain adaptation methods on all shift scenarios.
 Design: 1 source domain + 1 target domain, linear observation model (nl_strength=0.0),
 IWCV for DANN/CDAN hyper-parameter selection.
 
-Core methods
-------------
-  inv_oracle   — LR on true invariant latent factors u_inv (upper bound)
-  all_observed — Pooled ERM LR on observed x (source-only baseline)
-  coral        — CORAL with LR estimator
-  dann         — DANN with IWCV HP selection
-  cdan         — Conditional DANN with IWCV HP selection
-
-Optional / appendix
--------------------
-  irm          — IRM (excluded from main benchmark; add --include_irm)
+Methods
+-------
+  inv_oracle    — LR on true invariant latent factors u_inv (upper bound)
+  all_observed  — Pooled ERM LR on observed x (source-only baseline)
+  coral         — CORAL with LR estimator
+  prior_recalib — Saerens EM prior-shift recalibration
+  platt_scaling — Platt (sigmoid) post-hoc calibration on source val
+  isotonic      — Isotonic post-hoc calibration on source val
+  dann          — DANN with IWCV HP selection
+  cdan          — Conditional DANN with IWCV HP selection
 
 Scenarios
 ---------
-  Core    : no_shift, covariate_shift, spurious_shift, baseline_hazard_shift, concept_shift
+  Core    : no_shift, covariate_shift, observational_shift, spurious_shift,
+            baseline_hazard_shift, concept_shift, shape_shift
   Appendix: strong_covariate_shift, cure_shift  (add --include_appendix)
 
 Usage
 -----
   cd /path/to/SHIFT-SURV
 
-  # Paper benchmark (1+1, 5 scenarios, IWCV, 10 seeds):
+  # Paper benchmark (1+1, all core scenarios, IWCV, 10 seeds):
   python -m experiments.run_adaptation
 
   # Quick smoke-test (1 seed):
@@ -418,26 +418,6 @@ def _plot_loss_curves(
         plt.close(fig)
 
 
-def _plot_reliability_diagrams(
-    all_rows_raw: list[dict],
-    scenarios: list[str],
-    all_results_by_seed: list[tuple[str, int, list[dict]]],
-    out_dir: "Path",
-    prefix: str,
-) -> None:
-    """
-    Reliability diagrams: one PNG per scenario.
-    Each subplot shows the calibration curve (mean predicted prob vs fraction positive)
-    for each method, averaged across seeds.
-
-    Parameters
-    ----------
-    all_results_by_seed : list of (scenario, seed, results_list)
-        The raw result dicts from fit_* calls, needed to get per-sample probabilities.
-    """
-    pass  # populated below via _plot_reliability_diagrams_impl
-
-
 def _plot_calibration_curves(
     calib_data: dict[str, dict[str, tuple[np.ndarray, np.ndarray]]],
     scenarios: list[str],
@@ -526,7 +506,7 @@ def _print_implementation_report(
     print("  IMPLEMENTATION REPORT  (DA methods vs LR ERM baseline)")
     print(sep)
     idx = {(r["scenario"], r["method"]): r for r in agg}
-    da_methods = [m for m in methods if m in ("coral", "prior_recalib", "dann", "cdan", "irm")]
+    da_methods = [m for m in methods if m in ("coral", "prior_recalib", "dann", "cdan")]
 
     for m in da_methods:
         aurocs, nan_count = [], 0
@@ -812,7 +792,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--scenarios", nargs="+", default=None, metavar="SCENARIO",
-        help=f"Scenarios to run (space-separated). Defaults to core 5. "
+        help=f"Scenarios to run (space-separated). Defaults to all core scenarios. "
              f"Available: {CORE_SCENARIOS + APPENDIX_SCENARIOS}",
     )
     parser.add_argument(

@@ -1000,9 +1000,8 @@ def fit_domain_params(
     km_survival = _km_at_tau(t_d, delta_d, tau)
     km_prevalence = float(np.clip(1.0 - km_survival, 0.01, 0.99))
 
-    # Fit baseline hazard (distribution-aware)
-    time_dist = getattr(params, "time_distribution", "weibull") if False else "weibull"
-    # NOTE: time_distribution is passed as kwarg at the pipeline level; default Weibull here
+    # Fit baseline hazard.  This helper assumes a Weibull PH model; the
+    # distribution-aware path (log-logistic) lives in fit_reference_generator.
     lambda0_d = fit_lambda0(eta_d, km_prevalence, tau=tau, nu=nu)
 
     # Synthetic domains are generated WITHOUT censoring.

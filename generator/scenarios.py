@@ -2,14 +2,18 @@
 Scenario interface — Section 5 / Table 1 of the paper.
 
 Each scenario is defined by which subset of Θ_d varies across domains
-while the rest is held fixed.  The five main scenarios are:
+while the rest is held fixed.  The core scenarios are:
 
   no_shift              — nothing varies; control regime
-  covariate_shift       — μ^(inv), μ^(spu), A, Σ vary; outcome mechanism fixed
-  spurious_shift        — μ^(spu), A, Σ vary; v_d = 0 (spurious factors enter
+  covariate_shift       — μ^(inv), μ^(spu), Σ vary; A and outcome mechanism fixed
+  observational_shift   — covariate_shift + A_inv rotated in the target
+  spurious_shift        — μ^(spu), Σ vary; v_d = 0 (spurious factors enter
                           covariates differently but never directly the risk)
-  baseline_hazard_shift — β_{0,d}, λ_{0,d}, ν_d vary; latent ranking preserved
-  concept_shift         — w_d changes; conditional outcome mechanism shifts
+  baseline_hazard_shift — λ_{0,d} varies; latent ranking preserved
+  concept_shift         — w_d changes sign; conditional outcome mechanism shifts
+  shape_shift           — Weibull shape ν varies (PH still holds)
+
+Appendix scenarios: strong_covariate_shift, cure_shift.
 
 Usage
 -----
@@ -264,14 +268,17 @@ def _spurious_shift(
         """
         Block covariance for [u_inv; u_spu] with controlled cross-correlation ρ.
 
-        Cross-block = ρ · I_{k_inv × k_spu}  (paired dimensions only).
-        The resulting (k_inv+k_spu)×(k_inv+k_spu) block matrix is:
+        Only the first k_min = min(k_inv, k_spu) invariant/spurious dimensions
+        are paired (Cross-block[i, k_inv+i] = ρ for i < k_min); the rest stay
+        independent.  Each paired (u_inv_i, u_spu_i) forms a 2×2 block
+        [[1, ρ], [ρ, 1]] with eigenvalues 1±ρ.  So the spectrum is:
 
-            [ I_{k_inv}           ρ · I_{k_inv}  ]
-            [ ρ · I_{k_inv}^T    I_{k_spu}       ]
+            1+ρ  (multiplicity k_min)
+            1−ρ  (multiplicity k_min)
+            1    (multiplicity k_inv + k_spu − 2·k_min, the unpaired dims)
 
-        Eigenvalues are exactly 1+ρ (multiplicity k_inv) and 1−ρ (multiplicity
-        k_inv), plus 1 for the unpaired k_spu − k_inv dimensions (if any).
+        With the defaults k_inv=3, k_spu=2 → k_min=2: eigenvalues 1±ρ each with
+        multiplicity 2, plus one unpaired invariant dim with eigenvalue 1.
         This is PD for |ρ| < 1 — no PSD correction required.
 
         Previous design (all-ones cross-block) was only PD for ρ < 1/k_inv,

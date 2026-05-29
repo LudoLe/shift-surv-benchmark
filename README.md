@@ -14,7 +14,7 @@ pip install -r requirements.txt
 ## Run the benchmark
 
 ```bash
-# Main benchmark (5 scenarios × 6 methods × 10 seeds)
+# Main benchmark (7 core scenarios × 8 methods × 10 seeds)
 python -m experiments.run_adaptation
 
 # Include appendix scenarios (strong_covariate_shift, cure_shift)
@@ -32,12 +32,14 @@ Outputs are written to `outputs/tables/<prefix>_raw/summary/compact/hp_sweep.csv
 | Scenario | What shifts | Expected effect |
 |---|---|---|
 | `no_shift` | nothing | baseline, gap ≈ 0 |
-| `covariate_shift` | P(X): A_inv rotated 60° | AUROC drops, DA methods recover partially |
+| `covariate_shift` | P(X): latent means μ only | AUROC stable (P(Y\|u_inv) fixed) |
+| `observational_shift` | P(X) + A_inv rotated 60° | AUROC drops, DA methods recover partially |
 | `spurious_shift` | latent cross-covariance | spurious features become unreliable |
 | `baseline_hazard_shift` | λ₀ only | AUROC stable, ECE degrades; recalibration helps |
-| `concept_shift` | w_d sign flip | AUROC collapses, no method recovers |
-| `strong_covariate_shift` | P(X): A_inv rotated 90° | positive control, large gap |
-| `cure_shift` | cure fraction | appendix only |
+| `concept_shift` | w_d partial sign flip | AUROC drops, no method recovers |
+| `shape_shift` | Weibull shape ν | calibration degrades; ranking preserved |
+| `strong_covariate_shift` | P(X): A_spu rotated 90° + noise | positive control, large gap (appendix) |
+| `cure_shift` | cure fraction | non-PH, appendix only |
 
 ## Methods
 
@@ -47,6 +49,8 @@ Outputs are written to `outputs/tables/<prefix>_raw/summary/compact/hp_sweep.csv
 | ERM LR | `lr_erm` | Pooled source logistic regression |
 | CORAL | `coral` | Covariance alignment + LR |
 | Prior recalibration | `prior_recalib` | Saerens EM prior-shift correction (no target labels) |
+| Platt scaling | `platt_scaling` | Sigmoid post-hoc calibration on source val |
+| Isotonic | `isotonic` | Isotonic post-hoc calibration on source val |
 | DANN | `dann` | Domain-adversarial network, IWCV HP tuning |
 | CDAN | `cdan` | Conditional DANN, IWCV HP tuning |
 

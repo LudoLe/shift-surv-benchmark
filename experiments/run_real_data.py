@@ -168,17 +168,18 @@ def _run_seed(
         "target": _score(y_tgt, p_adj),
     })
 
-    # --- Platt scaling ---
-    from scipy.optimize import minimize_scalar as _min_scalar
-    logits_val = lr.decision_function(X_val_s)
-    logits_tgt = lr.decision_function(X_tgt_s)
-    def _nll(T):
-        p = 1 / (1 + np.exp(-logits_val / T))
-        p = np.clip(p, 1e-7, 1 - 1e-7)
-        return -np.mean(y_val * np.log(p) + (1 - y_val) * np.log(1 - p))
-    T_opt = _min_scalar(_nll, bounds=(0.01, 10.0), method="bounded").x
-    p_tgt_platt = 1 / (1 + np.exp(-logits_tgt / T_opt))
-    p_val_platt = 1 / (1 + np.exp(-logits_val / T_opt))
+    # --- Platt scaling (sigmoid calibration) ---
+    # 1-D logistic regression on the raw probabilities, fitted on source val.
+    # Identical to experiments.baselines._fit_posthoc_calib (scale + bias), so
+    # the synthetic and real-data Platt baselines are the same method.  The bias
+    # term is essential: temperature-only scaling cannot correct a prior/offset
+    # shift between source and target.
+    p_val_raw = lr.predict_proba(X_val_s)[:, 1]
+    p_tgt_raw = lr.predict_proba(X_tgt_s)[:, 1]
+    platt = LogisticRegression(C=1e6, solver="lbfgs", max_iter=1000, random_state=0)
+    platt.fit(p_val_raw.reshape(-1, 1), y_val)
+    p_val_platt = platt.predict_proba(p_val_raw.reshape(-1, 1))[:, 1]
+    p_tgt_platt = platt.predict_proba(p_tgt_raw.reshape(-1, 1))[:, 1]
     results.append({
         "method": "platt_scaling",
         "source_pooled": _score(y_val, p_val_platt),

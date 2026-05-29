@@ -16,56 +16,31 @@ Data-generating process per individual i in domain d:
   how latent factors are observed can be induced through either matrix
   independently — useful for covariate-shift and spurious-shift scenarios.
 
-  η_{i,d}  = β_{0,d} + w_d^T u^(inv) + v_d^T u^(spu) -  eta è un vettore di lunghezza n (uno scalare per paziente) che contiene il log-rischio latente di  
-  ogni individuo nel dominio.
+  η_{i,d}  = β_{0,d} + w_d^T u^(inv) + v_d^T u^(spu)   [latent log-risk, one per patient]
 
-    β_{0,d} — intercetta del dominio. Uno scalare che sposta il rischio di tutti i pazienti del centro 
-    d verso l'alto o verso il basso, indipendentemente dalle loro caratteristiche individuali. È il    
-    "rischio basale medio" del centro. Cambia tra domini nel baseline_hazard_shift. 
-
-    w_d^T u^(inv)_{i,d} — contributo dei fattori invarianti. w_d è un vettore di pesi (k_inv           
-    componenti) che dice quanto conta ciascun fattore causale nel determinare il rischio. u^(inv)_{i,d}
-    è il valore di quei fattori per il paziente i. Il prodotto scalare somma i contributi: fattori con
-    peso positivo aumentano il rischio, negativi lo abbassano. Nel concept_shift è w_d a cambiare.
-
-    v_d^T u^(spu)_{i,d} — contributo dei fattori spurious. Stessa struttura di prima, ma per i fattori 
-    non causali. Nel generatore v_d = 0 per default ovunque: i fattori spurious non entrano mai in η.
-    Questo è il punto chiave — esistono in x ma sono causalmente disconnessi dall'outcome. 
+    β_{0,d}              — domain intercept: shifts every patient's risk in
+                           center d uniformly. Varies in baseline_hazard_shift.
+    w_d^T u^(inv)_{i,d}  — invariant contribution: w_d weights the causal
+                           factors. The sign flips in concept_shift.
+    v_d^T u^(spu)_{i,d}  — spurious contribution: v_d = 0 by default everywhere,
+                           so spurious factors live in x but never enter η.
 
   U_{i,d}  ~ Uniform(0,1)
   T_{i,d}  = (- log U / (λ_{0,d} exp(η)))^{1/ν_d}   [Weibull PH inverse CDF]
 
-  CDF -  Se vuoi campionare una variabile aleatoria con CDF F(t), puoi prendere U ~ Uniform(0,1) e calcolare T = F⁻¹(U). È garantito che T ha la distribuzione giusta.  
-  in questo caso: 
-    Quindi la CDF è F(t) = 1 - S(t). Campionare T ~ F equivale a risolvere:                                                                                                                                
-    U = S(T)      con U ~ Uniform(0,1)                                                                                                                                                                  
-    (U e 1−U hanno la stessa distribuzione uniforme, quindi si usa direttamente S invece di F).        
-    Risolvendo per T:                                                                                                                                                                                
-        U = exp(- λ₀ · T^ν · exp(η))
-        log U = - λ₀ · T^ν · exp(η)                                                                        
-        T^ν = - log U / (λ₀ · exp(η))
-        T = (- log U / (λ₀ · exp(η)))^{1/ν}  
+  Sampling via inverse-CDF: with S(t) = exp(-λ₀ t^ν exp(η)) and U ~ Uniform(0,1)
+  (using S directly since U and 1-U are both uniform), solve U = S(T) for T:
+      log U = -λ₀ T^ν exp(η)  →  T = (-log U / (λ₀ exp(η)))^{1/ν}
+  -log U ~ Exp(1) supplies the individual-level randomness; λ₀ exp(η) is the
+  total hazard scale (larger → earlier event); 1/ν reshapes the time axis.
 
-    - −log U è sempre positivo (U ∈ (0,1) → log U < 0) e ha distribuzione Esponenziale(1). Introduce la
-   casualità individuale — due pazienti con lo stesso η hanno tempi diversi.                         
-    - λ₀ · exp(η) è il rischio totale del paziente: scala quanto velocemente arriva l'evento. Più è
-    alto, più T è piccolo.                                                                             
-    - 1/ν controlla la forma: comprime o espande la scala temporale in modo non lineare.                                   
-    
   S(t | η) = P(T > t) = exp(- λ₀ · t^ν · exp(η))
   y^(τ)_{i,d} = 1[T_{i,d} ≤ τ]
 
-   No, non usiamo Cox. Usiamo il Weibull PH.                                                          
-                                                                                                     
-  Condividono la struttura PH — il log-rischio η moltiplica la baseline hazard — ma differiscono su  
-  cosa è quella baseline:                                                                            
-                                                                                                     
-  Cox:       h(t|η) = h₀(t) · exp(η)      h₀(t) non specificata
-  Weibull PH: h(t|η) = λ₀ · ν · t^{ν-1} · exp(η)    h₀(t) = λ₀ · ν · t^{ν-1}                         
-                                                                                                     
-  Cox è un modello di stima — utile quando non vuoi assumere una forma per h₀(t). Weibull PH è un    
-  modello generativo — utile quando devi campionare T, perché hai una formula chiusa per l'inversa   
-  della CDF. Per un generatore sintetico serve necessariamente la seconda. 
+  This is Weibull PH, not Cox: both share the PH structure (η multiplies the
+  baseline hazard), but Weibull PH specifies h₀(t) = λ₀ ν t^{ν-1}, giving a
+  closed-form inverse CDF needed to sample T. Cox leaves h₀(t) unspecified and
+  is an estimation model, not a generative one.
 """
 
 from __future__ import annotations
@@ -229,8 +204,8 @@ class SyntheticGenerator:
         # ---- optional tanh nonlinear observation term ----------------------
         # x += α · B_nl tanh(u_inv)
         # tanh(u_inv) is a monotone, saturating function of the invariant factors.
-        # Unlike the squared term, tanh(u_inv) IS correlated with u_inv (and
-        # hence with η), so it adds a nonlinear signal pathway that LR can only
+        # tanh(u_inv) is correlated with u_inv (and hence with η), so it adds a
+        # nonlinear signal pathway that LR can only
         # partially exploit via its linear projection.  MLP can learn to invert
         # the saturating mapping and recover better estimates of u_inv.
         # B_nl is (p, k_inv); tanh(u_inv) is (n, k_inv) → contribution is (n, p).
@@ -302,7 +277,10 @@ class SyntheticGenerator:
         else:
             C_arr = np.full(n, np.inf)
         t_obs = np.minimum(T, C_arr)
-        delta = (T <= C_arr).astype(int)
+        # np.isfinite(T) guards the cure model: cured patients have T = inf and
+        # must be treated as censored (delta = 0).  Without it the inf <= inf
+        # edge case (no censoring) would wrongly mark them as events.
+        delta = ((T <= C_arr) & np.isfinite(T)).astype(int)
 
         # ---- fixed-horizon label -------------------------------------------
         # y = 1[t_obs <= tau AND delta == 1]
