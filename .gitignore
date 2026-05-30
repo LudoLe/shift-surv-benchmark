@@ -2,9 +2,17 @@
 data/raw/
 data_multimodal/
 
+# ── Other-paper code (kept on disk, out of this repo) ─────────────────────────
+# This repo (SHIFT-SURV) only tracks the synthetic-benchmark + I3LUNG pipeline.
+# The files below belong to a separate paper and are intentionally untracked.
+data/
+generator/fitting.py
+generator/shift_components.py
+utils/plotting.py
+
 # ── Experiment outputs (regenerable) ─────────────────────────────────────────
-outputs/tables/
-outputs/figures/
+outputs/
+outputs [0-9]*/
 
 # ── Python cache ──────────────────────────────────────────────────────────────
 __pycache__/
