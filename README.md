@@ -47,7 +47,9 @@ Outputs are written to `outputs/tables/<prefix>_raw/summary/compact/hp_sweep.csv
 |---|---|---|
 | Invariant oracle | `inv_oracle` | LR on true latent u_inv — upper bound |
 | ERM LR | `lr_erm` | Pooled source logistic regression |
+| IW-ERM | `iw_erm` | Importance-weighted ERM (covariate-shift correction) |
 | CORAL | `coral` | Covariance alignment + LR |
+| IRM | `irm` | Invariant Risk Minimization (IRMv1; needs ≥2 source domains) |
 | Prior recalibration | `prior_recalib` | Saerens EM prior-shift correction (no target labels) |
 | Platt scaling | `platt_scaling` | Sigmoid post-hoc calibration on source val |
 | Isotonic | `isotonic` | Isotonic post-hoc calibration on source val |

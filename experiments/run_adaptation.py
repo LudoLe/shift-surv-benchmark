@@ -8,7 +8,9 @@ Methods
 -------
   inv_oracle    — LR on true invariant latent factors u_inv (upper bound)
   all_observed  — Pooled ERM LR on observed x (source-only baseline)
+  iw_erm        — Importance-weighted ERM (covariate-shift correction)
   coral         — CORAL with LR estimator
+  irm           — Invariant Risk Minimization (IRMv1, linear)
   prior_recalib — Saerens EM prior-shift recalibration
   platt_scaling — Platt (sigmoid) post-hoc calibration on source val
   isotonic      — Isotonic post-hoc calibration on source val
@@ -71,7 +73,7 @@ from experiments.baselines import (
     fit_invariant_oracle, fit_all_observed, fit_prior_recalib,
     fit_platt_scaling, fit_isotonic,
 )
-from experiments.adaptation_methods import fit_coral, fit_dann, fit_cdan
+from experiments.adaptation_methods import fit_coral, fit_dann, fit_cdan, fit_iw_erm, fit_irm
 from utils.io import save_table_csv
 
 _TABLES = _ROOT / "outputs" / "tables"
@@ -94,7 +96,9 @@ APPENDIX_SCENARIOS = [
 _DISPLAY = {
     "invariant_oracle": "inv_oracle",
     "all_observed":     "lr_erm",
+    "iw_erm":           "iw_erm",
     "coral":            "coral",
+    "irm":              "irm",
     "prior_recalib":    "prior_recalib",
     "dann":             "dann",
     "cdan":             "cdan",
@@ -132,7 +136,9 @@ def _run_one(
     results = [
         fit_invariant_oracle(src, tgt),
         fit_all_observed(src, tgt),
+        fit_iw_erm(src, tgt, seed=seed),
         fit_coral(src, tgt, seed=seed),
+        fit_irm(src, tgt, seed=seed),
         fit_prior_recalib(src, tgt),
         fit_platt_scaling(src, tgt),
         fit_isotonic(src, tgt),
@@ -436,7 +442,9 @@ def _plot_calibration_curves(
     colors = {
         "invariant_oracle": "black",
         "all_observed":     "steelblue",
+        "iw_erm":           "slategray",
         "coral":            "seagreen",
+        "irm":              "mediumvioletred",
         "prior_recalib":    "goldenrod",
         "platt_scaling":    "peru",
         "isotonic":         "darkorange",
@@ -446,7 +454,9 @@ def _plot_calibration_curves(
     linestyles = {
         "invariant_oracle": "--",
         "all_observed":     "-",
+        "iw_erm":           ":",
         "coral":            "-",
+        "irm":              ":",
         "prior_recalib":    "-",
         "platt_scaling":    "-.",
         "isotonic":         "-.",
@@ -506,7 +516,7 @@ def _print_implementation_report(
     print("  IMPLEMENTATION REPORT  (DA methods vs LR ERM baseline)")
     print(sep)
     idx = {(r["scenario"], r["method"]): r for r in agg}
-    da_methods = [m for m in methods if m in ("coral", "prior_recalib", "dann", "cdan")]
+    da_methods = [m for m in methods if m in ("iw_erm", "coral", "irm", "prior_recalib", "dann", "cdan")]
 
     for m in da_methods:
         aurocs, nan_count = [], 0
@@ -579,8 +589,8 @@ def run_adaptation(
         seeds = list(range(10))
 
     methods = [
-        "invariant_oracle", "all_observed", "coral", "prior_recalib",
-        "platt_scaling", "isotonic", "dann", "cdan",
+        "invariant_oracle", "all_observed", "iw_erm", "coral", "irm",
+        "prior_recalib", "platt_scaling", "isotonic", "dann", "cdan",
     ]
 
     all_rows:  list[dict] = []
@@ -690,8 +700,8 @@ def run_n_sweep(
       - one aggregated plot: AUROC vs n, per method, per scenario
     """
     methods = [
-        "invariant_oracle", "all_observed", "coral", "prior_recalib",
-        "platt_scaling", "isotonic", "dann", "cdan",
+        "invariant_oracle", "all_observed", "iw_erm", "coral", "irm",
+        "prior_recalib", "platt_scaling", "isotonic", "dann", "cdan",
     ]
     sweep_agg: dict[int, list[dict]] = {}
 
@@ -723,7 +733,9 @@ def _plot_n_sweep(
     colors = {
         "invariant_oracle": "black",
         "all_observed":     "steelblue",
+        "iw_erm":           "slategray",
         "coral":            "seagreen",
+        "irm":              "mediumvioletred",
         "prior_recalib":    "goldenrod",
         "platt_scaling":    "peru",
         "isotonic":         "darkorange",

@@ -150,6 +150,24 @@ def _run_seed(
         "target": _score(y_tgt, p_tgt),
     })
 
+    # --- IW-ERM (importance-weighted ERM) ---
+    # Reweight the source training risk by w(x)=P(tgt|x)/P(src|x) (domain
+    # classifier), the consistent correction under covariate shift.  Weights
+    # estimated on the training points themselves (the risk being reweighted).
+    from experiments.adaptation_methods import _importance_weights
+    sw = _importance_weights(X_tr_s, X_tgt_s, X_eval=X_tr_s)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=ConvergenceWarning)
+        lr_iw = LogisticRegression(**_LR_KWARGS)
+        lr_iw.fit(X_tr_s, y_tr, sample_weight=sw)
+    p_val_iw = lr_iw.predict_proba(X_val_s)[:, 1]
+    p_tgt_iw = lr_iw.predict_proba(X_tgt_s)[:, 1]
+    results.append({
+        "method": "iw_erm",
+        "source_pooled": _score(y_val, p_val_iw),
+        "target": _score(y_tgt, p_tgt_iw),
+    })
+
     # --- Prior recalibration ---
     pi_src = float(y_tr.mean())
     p_raw  = lr.predict_proba(X_tgt_s)[:, 1]
@@ -249,7 +267,7 @@ def _run_seed(
 
 _METRIC_KEYS = ["src_auroc", "tgt_auroc", "tgt_ece", "tgt_f1",
                 "tgt_sensitivity", "tgt_specificity", "gap"]
-_METHODS     = ["lr_erm", "prior_recalib", "platt_scaling", "coral", "dann", "cdan"]
+_METHODS     = ["lr_erm", "iw_erm", "prior_recalib", "platt_scaling", "coral", "dann", "cdan"]
 
 
 def _flatten_real(r: dict, seed: int) -> dict:

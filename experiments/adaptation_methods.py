@@ -553,6 +553,158 @@ def fit_cdan(
 
 
 # ---------------------------------------------------------------------------
+# IW-ERM — Importance-Weighted ERM (covariate-shift correction)
+# ---------------------------------------------------------------------------
+
+def fit_iw_erm(
+    source_datasets: list[DomainDataset],
+    target_dataset: DomainDataset,
+    seed: int = 0,
+) -> dict:
+    """
+    Importance-weighted ERM (Shimodaira 2000).
+
+    Trains a logistic regression on the pooled source train split, weighting
+    each sample by w(x) = P(tgt|x)/P(src|x) estimated with a domain classifier.
+    Under pure covariate shift (P(y|x) invariant) this is the consistent
+    correction: it reweights the source risk to match the target covariate
+    distribution.  No target labels are used.
+
+    Weights are estimated on the train split itself (the points being fitted),
+    which is the correct alignment for reweighting the training risk — distinct
+    from IWCV model selection, where weights must align with the held-out val
+    set (see _importance_weights / fit_dann).
+    """
+    X_all, y_all = _pool_sources(source_datasets)
+    X_tr, X_val, y_tr, y_val = train_test_split(
+        X_all, y_all, test_size=0.2, random_state=0, stratify=y_all,
+    )
+
+    scaler  = StandardScaler()
+    X_tr_s  = scaler.fit_transform(X_tr)
+    X_val_s = scaler.transform(X_val)
+    X_tgt_s = scaler.transform(target_dataset.x)
+
+    # w(x) on the training points themselves (reweight the empirical risk).
+    sw = _importance_weights(X_tr_s, X_tgt_s, X_eval=X_tr_s)
+
+    model = LogisticRegression(**_LR_KWARGS)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=ConvergenceWarning)
+        model.fit(X_tr_s, y_tr, sample_weight=sw)
+
+    probs_val = model.predict_proba(X_val_s)[:, 1]
+    probs_tgt = model.predict_proba(X_tgt_s)[:, 1]
+
+    source_scores = {}
+    for ds in source_datasets:
+        p_d = model.predict_proba(scaler.transform(ds.x))[:, 1]
+        source_scores[f"source_d{ds.domain_id}"] = _score(ds.y, p_d, ds.n)
+
+    return {
+        "feature_set":    "iw_erm",
+        "source_domains": source_scores,
+        "source_pooled":  _score(y_val, probs_val, len(y_val)),
+        "target":         _score(target_dataset.y, probs_tgt, target_dataset.n),
+        "target_probs":   probs_tgt,
+        "model":          model,
+        "scaler":         scaler,
+    }
+
+
+# ---------------------------------------------------------------------------
+# IRM — Invariant Risk Minimization, IRMv1 (Arjovsky et al. 2019)
+# ---------------------------------------------------------------------------
+
+def fit_irm(
+    source_datasets: list[DomainDataset],
+    target_dataset: DomainDataset,
+    lam: float = 1e2,
+    n_iter: int = 500,
+    seed: int = 0,
+) -> dict:
+    """
+    IRM, IRMv1 linear formulation (Arjovsky et al. 2019).
+
+    The IRMv1 penalty is the squared gradient of the per-environment risk with
+    respect to a *dummy scalar classifier* w fixed at 1.0 that multiplies the
+    representation Φ(x) = x @ θ (the logit):
+
+        min_θ  Σ_e R_e(θ)  +  λ · Σ_e ( ∂/∂w |_{w=1} R_e(w · Φ) )²
+
+    For logistic regression with logit z_i = x_i @ θ, the inner derivative is a
+    scalar per environment:
+
+        g_e = (1/n_e) Σ_i (σ(z_i) − y_i) · z_i
+
+    so the penalty is Σ_e g_e².  This is the standard IRMv1, NOT the naive
+    ||∇_θ R_e||² (which collapses to ERM at its own optimum) — that earlier
+    formulation was the bug flagged in review.
+
+    λ=100 is the usual default for IRMv1 on tabular data.  No inner CV.
+    """
+    from scipy.optimize import minimize
+    from scipy.special import expit
+
+    scaler = StandardScaler()
+    X_all, y_all = _pool_sources(source_datasets)
+    scaler.fit(X_all)
+
+    envs    = [(scaler.transform(ds.x), ds.y.astype(float)) for ds in source_datasets]
+    X_tgt_s = scaler.transform(target_dataset.x)
+    y_src_all = np.concatenate([y for _, y in envs])
+    p = envs[0][0].shape[1]
+
+    def _obj_and_grad(theta):
+        loss = 0.0
+        grad = np.zeros(p)
+        for X, y in envs:
+            n_e = len(y)
+            z   = X @ theta                         # logits (n_e,)
+            s   = expit(z)                          # sigma(z)
+            # --- ERM cross-entropy term ---
+            loss += float(np.mean(np.log1p(np.exp(-(2 * y - 1) * z))))
+            grad += X.T @ (s - y) / n_e
+            # --- IRMv1 penalty: g_e = mean((s - y) * z),  penalty = g_e^2 ---
+            g_e = float(np.mean((s - y) * z))
+            loss += lam * g_e * g_e
+            # dg_e/dtheta = mean( [ s(1-s) z + (s - y) ] * x )
+            coef = s * (1.0 - s) * z + (s - y)      # (n_e,)
+            dg   = X.T @ coef / n_e                 # (p,)
+            grad += lam * 2.0 * g_e * dg
+        return loss / len(envs), grad / len(envs)
+
+    rng = np.random.default_rng(seed)
+    w0  = rng.standard_normal(p) * 0.01
+    res = minimize(_obj_and_grad, w0, jac=True, method="L-BFGS-B",
+                   options={"maxiter": n_iter, "ftol": 1e-9, "gtol": 1e-6})
+    theta = res.x
+
+    # Intercept calibrated from pooled source prevalence (penalty is intercept-free)
+    b_opt = float(np.log(y_src_all.mean() / (1 - y_src_all.mean() + 1e-8)))
+
+    def _predict(X):
+        return expit(X @ theta + b_opt)
+
+    source_scores = {}
+    for ds in source_datasets:
+        source_scores[f"source_d{ds.domain_id}"] = _score(
+            ds.y, _predict(scaler.transform(ds.x)), ds.n)
+
+    probs_tgt = _predict(X_tgt_s)
+    X_src_pool = np.vstack([X for X, _ in envs])
+    return {
+        "feature_set":    "irm",
+        "source_domains": source_scores,
+        "source_pooled":  _score(y_src_all, _predict(X_src_pool), len(y_src_all)),
+        "target":         _score(target_dataset.y, probs_tgt, target_dataset.n),
+        "target_probs":   probs_tgt,
+        "model":          {"theta": theta, "b": b_opt, "lam": lam},
+        "scaler":         scaler,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Convenience: run all DA methods together
 # ---------------------------------------------------------------------------
 
