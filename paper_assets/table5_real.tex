@@ -1,0 +1,18 @@
+\begin{table}[t]\centering\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lccccc}
+\toprule
+Transfer & ERM & CORAL & DANN & CDAN & ERM ECE \\
+\midrule
+GHD$\to$INT & 0.724 & 0.718 & 0.685 & 0.660 & 0.071 \\
+INT$\to$GHD & 0.639 & 0.638 & 0.624 & 0.638 & 0.117 \\
+INT$\to$MH & 0.722 & 0.718 & 0.693 & 0.712 & 0.043 \\
+INT$\to$SZMC & 0.689 & 0.684 & 0.674 & 0.650 & 0.118 \\
+INT$\to$UOC & 0.708 & 0.708 & 0.671 & 0.668 & 0.117 \\
+INT$\to$VHIO & 0.723 & 0.725 & 0.706 & 0.694 & 0.070 \\
+VHIO$\to$INT & 0.707 & 0.693 & 0.674 & 0.693 & 0.137 \\
+\bottomrule
+\end{tabular}
+\caption{Real multi-center transfers on I3LUNG (6 centers, mean over 10 seeds). Across all seven source$\to$target pairs, even the best adaptation method per transfer does not exceed ERM target AUROC (best-DA\,$-$\,ERM: mean -0.004, range [-0.013, +0.002]), reproducing the synthetic finding.}
+\label{tab:real}
+\end{table}
