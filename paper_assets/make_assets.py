@@ -164,12 +164,24 @@ if __name__ == "__main__":
         erm_m, erm_ci = get_ci("lr_erm", "tgt_auroc")
         ece_m, ece_ci = get_ci("lr_erm", "tgt_ece")
 
+        all_methods = ["lr_erm", "coral", "dann", "cdan"]
+        auroc_vals = {m: get_ci(m, "tgt_auroc")[0] for m in all_methods}
+        best_m = max(auroc_vals, key=lambda k: auroc_vals[k]
+                     if not np.isnan(auroc_vals[k]) else -np.inf)
+
+        def _cell(method, metric="tgt_auroc"):
+            mv, mci = get_ci(method, metric)
+            txt = _fmt(mv, mci)
+            if method == best_m and metric == "tgt_auroc":
+                txt = "\\textbf{" + txt + "}"
+            return txt
+
         da_means = []
-        row = f"{src}$\\to${tgt} & {_fmt(erm_m, erm_ci)}"
+        row = f"{src}$\\to${tgt} & {_cell('lr_erm')}"
         for m in ("coral", "dann", "cdan"):
-            dm, dci = get_ci(m, "tgt_auroc")
+            dm = auroc_vals[m]
             da_means.append(dm)
-            row += f" & {_fmt(dm, dci)}"
+            row += f" & {_cell(m)}"
         row += f" & {_fmt(ece_m, ece_ci)} \\\\"
         rl.append(row)
         best_deltas.append(float(np.nanmax(da_means)) - erm_m)
