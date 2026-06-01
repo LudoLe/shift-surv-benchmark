@@ -1,18 +1,18 @@
 \begin{table}[t]\centering\small
-\setlength{\tabcolsep}{4pt}
+\setlength{\tabcolsep}{3.5pt}
 \begin{tabular}{lccccc}
 \toprule
 Transfer & ERM & CORAL & DANN & CDAN & ERM ECE \\
 \midrule
-GHD$\to$INT & 0.724 & 0.718 & 0.685 & 0.660 & 0.071 \\
-INT$\to$GHD & 0.639 & 0.638 & 0.624 & 0.638 & 0.117 \\
-INT$\to$MH & 0.722 & 0.718 & 0.693 & 0.712 & 0.043 \\
-INT$\to$SZMC & 0.689 & 0.684 & 0.674 & 0.650 & 0.118 \\
-INT$\to$UOC & 0.708 & 0.708 & 0.671 & 0.668 & 0.117 \\
-INT$\to$VHIO & 0.723 & 0.725 & 0.706 & 0.694 & 0.070 \\
-VHIO$\to$INT & 0.707 & 0.693 & 0.674 & 0.693 & 0.137 \\
+GHD$\to$INT & 0.724\,{\small$\pm$0.010} & 0.717\,{\small$\pm$0.011} & 0.686\,{\small$\pm$0.048} & 0.660\,{\small$\pm$0.041} & 0.071\,{\small$\pm$0.012} \\
+INT$\to$GHD & 0.639\,{\small$\pm$0.004} & 0.638\,{\small$\pm$0.003} & 0.623\,{\small$\pm$0.022} & 0.638\,{\small$\pm$0.005} & 0.116\,{\small$\pm$0.006} \\
+INT$\to$MH & 0.722\,{\small$\pm$0.005} & 0.718\,{\small$\pm$0.005} & 0.693\,{\small$\pm$0.020} & 0.712\,{\small$\pm$0.013} & 0.043\,{\small$\pm$0.008} \\
+INT$\to$SZMC & 0.689\,{\small$\pm$0.008} & 0.684\,{\small$\pm$0.006} & 0.674\,{\small$\pm$0.016} & 0.650\,{\small$\pm$0.023} & 0.118\,{\small$\pm$0.008} \\
+INT$\to$UOC & 0.708\,{\small$\pm$0.006} & 0.708\,{\small$\pm$0.004} & 0.672\,{\small$\pm$0.022} & 0.668\,{\small$\pm$0.015} & 0.117\,{\small$\pm$0.008} \\
+INT$\to$VHIO & 0.723\,{\small$\pm$0.010} & 0.724\,{\small$\pm$0.009} & 0.706\,{\small$\pm$0.020} & 0.694\,{\small$\pm$0.016} & 0.070\,{\small$\pm$0.010} \\
+VHIO$\to$INT & 0.707\,{\small$\pm$0.005} & 0.693\,{\small$\pm$0.005} & 0.674\,{\small$\pm$0.021} & 0.693\,{\small$\pm$0.012} & 0.137\,{\small$\pm$0.010} \\
 \bottomrule
 \end{tabular}
-\caption{Real multi-center transfers on I3LUNG (6 centers, mean over 10 seeds). Across all seven source$\to$target pairs, even the best adaptation method per transfer does not exceed ERM target AUROC (best-DA\,$-$\,ERM: mean -0.004, range [-0.013, +0.002]), reproducing the synthetic finding.}
+\caption{Real multi-center transfers on I3LUNG (6 centers, mean\,$\pm$\,95\% CI over 10 seeds). Across all seven source$\to$target pairs, even the best adaptation method does not exceed ERM target AUROC (best-DA\,$-$\,ERM: mean -0.004, range [-0.013, +0.002]).}
 \label{tab:real}
 \end{table}
