@@ -30,10 +30,10 @@ SCEN_LBL = {
     "shape_shift": "Shape",
 }
 METH = ["invariant_oracle", "all_observed", "coral", "prior_recalib",
-        "platt_scaling", "isotonic", "dann", "cdan"]
+        "platt_scaling", "dann", "cdan"]
 METH_LBL = {
     "invariant_oracle": "Oracle", "all_observed": "ERM", "coral": "CORAL",
-    "prior_recalib": "Prior-EM", "platt_scaling": "Platt", "isotonic": "Isotonic",
+    "prior_recalib": "Prior-EM", "platt_scaling": "Platt",
     "dann": "DANN", "cdan": "CDAN",
 }
 
@@ -70,12 +70,19 @@ def make_synth_table(A, metric, caption, label, bold_min=False):
     lines.append("\\midrule")
     for sc in SCEN:
         cells = []
-        # pick best non-oracle for emphasis
-        vals = {m: fnum(A.get((sc, m)), metric + "_mean") for m in METH if m != "invariant_oracle"}
-        best = (min if bold_min else max)(vals, key=lambda k: (np.inf if np.isnan(vals[k]) else (vals[k] if not bold_min else -vals[k])))
+        # bold: highest AUROC (bold_min=False) or lowest ECE (bold_min=True),
+        # excluding oracle and any NaN entries.
+        vals = {m: fnum(A.get((sc, m)), metric + "_mean")
+                for m in METH if m != "invariant_oracle"}
+        finite = {m: v for m, v in vals.items() if not np.isnan(v)}
+        if finite:
+            best = min(finite, key=finite.__getitem__) if bold_min \
+                   else max(finite, key=finite.__getitem__)
+        else:
+            best = None
         for m in METH:
             txt = _cell(A.get((sc, m)), metric)
-            if m == best and not np.isnan(vals.get(m, np.nan)):
+            if best and m == best:
                 txt = "\\textbf{" + txt + "}"
             cells.append(txt)
         lines.append(SCEN_LBL[sc] + " & " + " & ".join(cells) + " \\\\")
