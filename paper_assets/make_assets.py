@@ -25,7 +25,7 @@ SCEN = ["no_shift", "covariate_shift", "observational_shift", "spurious_shift",
         "baseline_hazard_shift", "concept_shift", "shape_shift"]
 SCEN_LBL = {
     "no_shift": "No shift", "covariate_shift": "Covariate",
-    "observational_shift": "Observational", "spurious_shift": "Spurious",
+    "observational_shift": "Measurement", "spurious_shift": "Spurious",
     "baseline_hazard_shift": "Baseline hazard", "concept_shift": "Concept",
     "shape_shift": "Shape",
 }

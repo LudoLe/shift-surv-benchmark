@@ -1,5 +1,5 @@
 """
-Publication-ready main figures for SHIFT-SURV.
+Publication-ready figures for SHIFT-SURV — IEEE conference style.
 Run from repo root: python paper_assets/make_figures.py
 """
 from __future__ import annotations
@@ -15,7 +15,6 @@ ROOT    = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SUMMARY = os.path.join(ROOT, "outputs", "tables", "benchmark_1s1t_iwcv_summary.csv")
 OUT     = os.path.join(ROOT, "paper_assets")
 
-# --- scenario order (no_shift excluded from main figures) ---
 SCEN_ORDER = [
     ("covariate_shift",       "Covariate"),
     ("observational_shift",   "Measurement"),
@@ -25,35 +24,31 @@ SCEN_ORDER = [
 ]
 HIGHLIGHT = "baseline_hazard_shift"
 
-# --- global style ---
+# ── palette (greyscale-safe) ────────────────────────────────────────────────
+C_STD  = "#6d8fa8"   # standard bar / ERM dot  (muted steel)
+C_HL   = "#b85450"   # baseline-hazard accent   (dusty red)
+C_DA   = "#2c5f8a"   # best DA                  (dark blue)
+C_ORC  = "#1a1a1a"   # oracle                   (near-black)
+C_GRID = "#e8eaed"   # grid lines
+
 plt.rcParams.update({
-    "font.family":        "sans-serif",
-    "font.sans-serif":   ["Helvetica Neue", "Helvetica", "Arial", "DejaVu Sans"],
+    "font.family":       "sans-serif",
+    "font.sans-serif":  ["Helvetica Neue", "Arial", "DejaVu Sans"],
     "font.size":          9,
-    "axes.titlesize":     9,
     "axes.labelsize":     9,
     "xtick.labelsize":    8,
     "ytick.labelsize":    8.5,
-    "legend.fontsize":    8,
+    "legend.fontsize":    7.5,
     "axes.linewidth":     0.5,
     "xtick.major.width":  0.5,
-    "ytick.major.width":  0.5,
-    "xtick.major.size":   3,
+    "ytick.major.width":  0,
+    "xtick.major.size":   2.5,
     "ytick.major.size":   0,
     "axes.spines.top":    False,
     "axes.spines.right":  False,
     "axes.spines.left":   False,
     "axes.axisbelow":     True,
-    "figure.dpi":         180,
-    "savefig.dpi":        300,
 })
-
-# Palette — passes greyscale
-SLATE   = "#546e7a"   # non-highlight bars / ERM dots
-RED     = "#c0392b"   # baseline hazard highlight
-BLUE    = "#1a5276"   # best DA dots
-BLACK   = "#111111"   # oracle dots
-LGREY   = "#e0e4e8"   # grid / connector
 
 
 def load(path):
@@ -68,153 +63,149 @@ def get(A, sc, m, metric):
     r = A.get((sc, m))
     if not r:
         return np.nan, np.nan
-    mn  = r.get(metric + "_mean", "")
-    ci  = r.get(metric + "_ci95",  "")
+    mn = r.get(metric + "_mean", "")
+    ci = r.get(metric + "_ci95",  "")
     return (float(mn) if mn not in ("", "nan") else np.nan,
-            float(ci)  if ci  not in ("", "nan") else 0.0)
+            float(ci) if ci not in ("", "nan") else 0.0)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Figure 1 — Discrimination vs Calibration divergence (two-panel horizontal bars)
+# Figure 1  — two-panel horizontal bars (discrimination vs calibration)
 # ─────────────────────────────────────────────────────────────────────────────
 def make_fig1(A):
     keys   = [k for k, _ in SCEN_ORDER]
     labels = [l for _, l in SCEN_ORDER]
     n      = len(keys)
-    # render bottom-to-top so top label = first in list
-    yi     = np.arange(n - 1, -1, -1)
+    yi     = np.arange(n - 1, -1, -1, dtype=float)   # top → bottom
 
     gap    = [get(A, k, "all_observed", "gap")[0]     for k in keys]
     gap_ci = [get(A, k, "all_observed", "gap")[1]     for k in keys]
     ece    = [get(A, k, "all_observed", "tgt_ece")[0] for k in keys]
     ece_ci = [get(A, k, "all_observed", "tgt_ece")[1] for k in keys]
+    colors = [C_HL if k == HIGHLIGHT else C_STD for k in keys]
 
-    colors = [RED if k == HIGHLIGHT else SLATE for k in keys]
+    fig = plt.figure(figsize=(6.5, 2.2))
+    # manually placed axes so y-labels don't get clipped
+    axA = fig.add_axes([0.175, 0.17, 0.345, 0.75])
+    axB = fig.add_axes([0.590, 0.17, 0.385, 0.75])
 
-    fig = plt.figure(figsize=(6.8, 2.4))
-    axA = fig.add_axes([0.18, 0.18, 0.35, 0.72])   # left panel
-    axB = fig.add_axes([0.58, 0.18, 0.38, 0.72])   # right panel
+    BAR  = 0.32
+    EKW  = dict(ecolor="#555", elinewidth=0.65, capsize=2.0, capthick=0.65)
 
-    BAR_H = 0.52
-    EKW   = dict(ecolor="#444444", elinewidth=0.8, capsize=2.5, capthick=0.8)
-
-    for ax, vals, cis, xlabel, panel in [
-        (axA, gap, gap_ci, "Source−target AUROC gap", "A"),
-        (axB, ece, ece_ci, "Target ECE",              "B"),
+    for ax, vals, cis, xlab in [
+        (axA, gap, gap_ci, "Source−target AUROC gap"),
+        (axB, ece, ece_ci, "Target ECE"),
     ]:
-        ax.barh(yi, vals, xerr=cis, color=colors, height=BAR_H,
+        ax.barh(yi, vals, xerr=cis, color=colors, height=BAR,
                 error_kw=EKW, linewidth=0, zorder=2)
-        ax.set_xlabel(xlabel, labelpad=4)
+        ax.set_xlabel(xlab, labelpad=3)
         ax.set_yticks(yi)
-        ax.set_ylim(-0.6, n - 0.4)
-        ax.tick_params(axis="y", left=False, pad=3)
-        ax.grid(axis="x", color=LGREY, linewidth=0.5, zorder=0)
-        ax.spines["left"].set_visible(False)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.text(-0.04, 1.05, f"({panel})", transform=ax.transAxes,
-                fontsize=9, fontweight="bold", va="bottom")
+        ax.tick_params(axis="y", left=False, pad=4)
+        # very subtle solid grid
+        ax.xaxis.grid(True, color=C_GRID, linewidth=0.5, zorder=0)
+        ax.set_axisbelow(True)
+        ax.set_ylim(-0.55, n - 0.45)
 
-    axA.set_yticklabels(labels, fontsize=8.5)
+    axA.set_yticklabels(labels, linespacing=0.9)
     axB.set_yticklabels([])
-    axA.axvline(0, color="#888888", lw=0.7, zorder=3)
+    axA.axvline(0, color="#aaa", lw=0.65, zorder=3)
 
-    handles = [
-        mpatches.Patch(color=RED,   label="Baseline hazard"),
-        mpatches.Patch(color=SLATE, label="Other shifts"),
-    ]
+    # panel labels — inside plot, top-left, small caps style
+    for ax, lbl in [(axA, "A"), (axB, "B")]:
+        ax.text(0.03, 0.97, lbl, transform=ax.transAxes,
+                fontsize=8.5, fontweight="bold",
+                va="top", ha="left", color="#333")
+
+    # legend — minimal, two patches
+    handles = [mpatches.Patch(facecolor=C_HL,  edgecolor="none", label="Baseline hazard"),
+               mpatches.Patch(facecolor=C_STD, edgecolor="none", label="Other shifts")]
     axB.legend(handles=handles, loc="lower right", frameon=False,
-               handlelength=1.2, handleheight=0.9, borderpad=0)
+               handlelength=0.9, handleheight=0.85, borderpad=0,
+               labelspacing=0.3, handletextpad=0.5)
+
     for ext in ("pdf", "png"):
         fig.savefig(os.path.join(OUT, f"fig1_divergence.{ext}"),
-                    bbox_inches="tight")
+                    dpi=300, bbox_inches="tight")
     plt.close(fig)
     print("wrote fig1_divergence.{pdf,png}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Figure 2 — Oracle headroom vs practical methods (dot-and-whisker)
+# Figure 2  — dot-and-whisker: oracle headroom vs practical methods
 # ─────────────────────────────────────────────────────────────────────────────
 def make_fig2(A):
     keys   = [k for k, _ in SCEN_ORDER]
     labels = [l for _, l in SCEN_ORDER]
     n      = len(keys)
-    # same top-to-bottom order as Fig 1
-    yi     = np.arange(n - 1, -1, -1)
+    yi     = np.arange(n - 1, -1, -1, dtype=float)
 
-    # ERM, best DA (max over CORAL/DANN/CDAN), Oracle
     erm_m, erm_ci, da_m, da_ci, orc_m, orc_ci = [], [], [], [], [], []
     for k in keys:
-        em, ec = get(A, k, "all_observed",    "tgt_auroc")
-        om, oc = get(A, k, "invariant_oracle","tgt_auroc")
-        cands  = [get(A, k, m, "tgt_auroc") for m in ("coral","dann","cdan")]
-        cands  = [(m, c) for m, c in cands if not np.isnan(m)]
+        em, ec = get(A, k, "all_observed",     "tgt_auroc")
+        om, oc = get(A, k, "invariant_oracle", "tgt_auroc")
+        cands  = [get(A, k, m, "tgt_auroc") for m in ("coral", "dann", "cdan")]
+        cands  = [(mv, cv) for mv, cv in cands if not np.isnan(mv)]
         dm, dc = max(cands, key=lambda t: t[0]) if cands else (np.nan, 0.0)
         erm_m.append(em); erm_ci.append(ec)
         da_m.append(dm);  da_ci.append(dc)
         orc_m.append(om); orc_ci.append(oc)
 
-    fig, ax = plt.subplots(figsize=(5.6, 2.6))
+    fig, ax = plt.subplots(figsize=(5.2, 2.5))
+    fig.subplots_adjust(left=0.20, right=0.97, top=0.97, bottom=0.14)
 
-    ROW_H  = 0.75   # vertical space per scenario row
-    OFF    = 0.20   # vertical offset between ERM / DA / Oracle within one row
-    MS     = 6      # marker size
-    EKW = dict(elinewidth=0.9, capsize=2.8, capthick=0.9)
+    OFF = 0.18   # vertical jitter between the three markers
+    MS  = 5.5
+    EKW = dict(elinewidth=0.75, capsize=2.2, capthick=0.75)
 
     for i, (k, yy) in enumerate(zip(keys, yi)):
-        em = erm_m[i]; om = orc_m[i]
+        em, om = erm_m[i], orc_m[i]
 
-        # grey connector ERM→Oracle (headroom)
-        ax.plot([em, om], [yy, yy],
-                color=LGREY, lw=2.0, solid_capstyle="round", zorder=1)
+        # headroom connector
+        ax.plot([em, om], [yy, yy], color="#ccc", lw=1.6,
+                solid_capstyle="round", zorder=1)
 
-        # concept shift: shade the whole row lightly to mark irrecoverability
-        if k == "concept_shift":
-            ax.axhspan(yy - 0.45, yy + 0.45, color="#fff3cd", alpha=0.6, zorder=0)
+        # three markers per row
+        ax.errorbar(em,      yy + OFF, xerr=erm_ci[i],
+                    fmt="o", color=C_STD, ms=MS, zorder=5,
+                    markeredgewidth=0, **EKW)
+        ax.errorbar(da_m[i], yy,       xerr=da_ci[i],
+                    fmt="s", color=C_DA,  ms=MS, zorder=5,
+                    markeredgewidth=0, **EKW)
+        ax.errorbar(om,      yy - OFF, xerr=orc_ci[i],
+                    fmt="D", color=C_ORC, ms=MS - 1, zorder=5,
+                    markeredgewidth=0, **EKW)
 
-        # ERM  — circle, slate
-        ax.errorbar(erm_m[i], yy + OFF, xerr=erm_ci[i],
-                    fmt="o", color=SLATE, ms=MS,
-                    markeredgecolor="white", markeredgewidth=0.5, zorder=5, **EKW)
-        # best DA — square, blue
-        ax.errorbar(da_m[i],  yy,       xerr=da_ci[i],
-                    fmt="s", color=BLUE,  ms=MS,
-                    markeredgecolor="white", markeredgewidth=0.5, zorder=5, **EKW)
-        # Oracle — diamond, black
-        ax.errorbar(orc_m[i], yy - OFF, xerr=orc_ci[i],
-                    fmt="D", color=BLACK, ms=MS-1,
-                    markeredgecolor="white", markeredgewidth=0.5, zorder=5, **EKW)
+    # concept-shift note — placed above the Concept row
+    concept_yi = yi[keys.index("concept_shift")]
+    ax.text(0.505, concept_yi + 0.42,
+            "oracle low: irrecoverable by construction",
+            fontsize=6.5, color="#999", va="bottom", ha="left", style="italic")
 
     ax.set_yticks(yi)
-    ax.set_yticklabels(labels)
-    ax.tick_params(axis="y", left=False)
-    ax.set_xlabel("Target AUROC", labelpad=4)
+    ax.set_yticklabels(labels, linespacing=0.9)
+    ax.tick_params(axis="y", left=False, pad=4)
+    ax.set_xlabel("Target AUROC", labelpad=3)
     ax.set_xlim(0.50, 0.90)
-    ax.grid(axis="x", color=LGREY, linewidth=0.5, zorder=0)
+    ax.xaxis.grid(True, color=C_GRID, linewidth=0.5, zorder=0)
     ax.set_axisbelow(True)
 
-    # annotation for concept shift — yi maps keys bottom-to-top
-    concept_yi = yi[keys.index("concept_shift")]
-    ax.text(0.515, concept_yi - 0.38,
-            "irrecoverable\nby construction",
-            fontsize=6.5, color="#7d6608", style="italic", va="bottom")
-
-    legend_items = [
-        Line2D([0],[0], marker="o", color="w", markerfacecolor=SLATE,
-               markeredgecolor="white", markersize=6, label="ERM"),
-        Line2D([0],[0], marker="s", color="w", markerfacecolor=BLUE,
-               markeredgecolor="white", markersize=6, label="Best DA"),
-        Line2D([0],[0], marker="D", color="w", markerfacecolor=BLACK,
-               markeredgecolor="white", markersize=5, label="Oracle"),
-        Line2D([0],[0], color=LGREY, lw=2.5, label="Recoverable headroom"),
+    # clean legend at bottom right
+    legend_el = [
+        Line2D([0], [0], marker="o", color=C_STD, ls="none",
+               ms=5.5, markeredgewidth=0, label="ERM"),
+        Line2D([0], [0], marker="s", color=C_DA,  ls="none",
+               ms=5.5, markeredgewidth=0, label="Best DA"),
+        Line2D([0], [0], marker="D", color=C_ORC, ls="none",
+               ms=4.5, markeredgewidth=0, label="Oracle"),
+        Line2D([0], [0], color="#ccc", lw=1.8, label="Headroom"),
     ]
-    ax.legend(handles=legend_items, loc="lower right", frameon=False,
-              ncol=2, columnspacing=1.0, handlelength=1.4, borderpad=0)
+    ax.legend(handles=legend_el, loc="lower right", frameon=False,
+              ncol=2, columnspacing=1.0, handlelength=1.2,
+              labelspacing=0.3, handletextpad=0.4, borderpad=0)
 
-    fig.tight_layout()
     for ext in ("pdf", "png"):
         fig.savefig(os.path.join(OUT, f"fig2_headroom.{ext}"),
-                    bbox_inches="tight")
+                    dpi=300, bbox_inches="tight")
     plt.close(fig)
     print("wrote fig2_headroom.{pdf,png}")
 
