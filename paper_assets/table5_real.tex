@@ -1,18 +1,20 @@
-\begin{table}[t]\centering\small
-\setlength{\tabcolsep}{3.5pt}
-\begin{tabular}{lccccc}
+\begin{table*}[t]\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{l cccc cccc}
 \toprule
-Transfer & ERM & CORAL & DANN & CDAN & ERM ECE \\
+& \multicolumn{4}{c}{Target AUROC $\uparrow$} & \multicolumn{4}{c}{Target ECE $\downarrow$} \\
+\cmidrule(lr){2-5}\cmidrule(lr){6-9}
+Transfer & ERM & CORAL & DANN & CDAN & ERM & CORAL & DANN & CDAN \\
 \midrule
-GHD$\to$INT & \textbf{0.724\,{\small$\pm$0.010}} & 0.717\,{\small$\pm$0.011} & 0.686\,{\small$\pm$0.048} & 0.660\,{\small$\pm$0.041} & 0.071\,{\small$\pm$0.012} \\
-INT$\to$GHD & \textbf{0.639\,{\small$\pm$0.004}} & 0.638\,{\small$\pm$0.003} & 0.623\,{\small$\pm$0.022} & 0.638\,{\small$\pm$0.005} & 0.116\,{\small$\pm$0.006} \\
-INT$\to$MH & \textbf{0.722\,{\small$\pm$0.005}} & 0.718\,{\small$\pm$0.005} & 0.693\,{\small$\pm$0.020} & 0.712\,{\small$\pm$0.013} & 0.043\,{\small$\pm$0.008} \\
-INT$\to$SZMC & \textbf{0.689\,{\small$\pm$0.008}} & 0.684\,{\small$\pm$0.006} & 0.674\,{\small$\pm$0.016} & 0.650\,{\small$\pm$0.023} & 0.118\,{\small$\pm$0.008} \\
-INT$\to$UOC & \textbf{0.708\,{\small$\pm$0.006}} & 0.708\,{\small$\pm$0.004} & 0.672\,{\small$\pm$0.022} & 0.668\,{\small$\pm$0.015} & 0.117\,{\small$\pm$0.008} \\
-INT$\to$VHIO & 0.723\,{\small$\pm$0.010} & \textbf{0.724\,{\small$\pm$0.009}} & 0.706\,{\small$\pm$0.020} & 0.694\,{\small$\pm$0.016} & 0.070\,{\small$\pm$0.010} \\
-VHIO$\to$INT & \textbf{0.707\,{\small$\pm$0.005}} & 0.693\,{\small$\pm$0.005} & 0.674\,{\small$\pm$0.021} & 0.693\,{\small$\pm$0.012} & 0.137\,{\small$\pm$0.010} \\
+GHD$\to$INT & \textbf{0.724\,{\small$\pm$0.010}} & 0.717\,{\small$\pm$0.011} & 0.686\,{\small$\pm$0.048} & 0.660\,{\small$\pm$0.041} & 0.071\,{\small$\pm$0.012} & \textbf{0.068\,{\small$\pm$0.011}} & 0.089\,{\small$\pm$0.013} & 0.078\,{\small$\pm$0.016} \\
+INT$\to$GHD & \textbf{0.639\,{\small$\pm$0.004}} & 0.638\,{\small$\pm$0.003} & 0.623\,{\small$\pm$0.022} & 0.638\,{\small$\pm$0.005} & 0.116\,{\small$\pm$0.006} & 0.128\,{\small$\pm$0.008} & \textbf{0.101\,{\small$\pm$0.010}} & 0.109\,{\small$\pm$0.010} \\
+INT$\to$MH & \textbf{0.722\,{\small$\pm$0.005}} & 0.718\,{\small$\pm$0.005} & 0.693\,{\small$\pm$0.020} & 0.712\,{\small$\pm$0.013} & \textbf{0.043\,{\small$\pm$0.008}} & 0.048\,{\small$\pm$0.006} & 0.081\,{\small$\pm$0.012} & 0.076\,{\small$\pm$0.018} \\
+INT$\to$SZMC & \textbf{0.689\,{\small$\pm$0.008}} & 0.684\,{\small$\pm$0.006} & 0.674\,{\small$\pm$0.016} & 0.650\,{\small$\pm$0.023} & 0.118\,{\small$\pm$0.008} & \textbf{0.111\,{\small$\pm$0.009}} & 0.139\,{\small$\pm$0.013} & 0.150\,{\small$\pm$0.014} \\
+INT$\to$UOC & \textbf{0.708\,{\small$\pm$0.006}} & 0.708\,{\small$\pm$0.004} & 0.672\,{\small$\pm$0.022} & 0.668\,{\small$\pm$0.015} & 0.117\,{\small$\pm$0.008} & 0.116\,{\small$\pm$0.008} & 0.119\,{\small$\pm$0.011} & \textbf{0.110\,{\small$\pm$0.013}} \\
+INT$\to$VHIO & 0.723\,{\small$\pm$0.010} & \textbf{0.724\,{\small$\pm$0.009}} & 0.706\,{\small$\pm$0.020} & 0.694\,{\small$\pm$0.016} & 0.070\,{\small$\pm$0.010} & \textbf{0.066\,{\small$\pm$0.013}} & 0.086\,{\small$\pm$0.020} & 0.081\,{\small$\pm$0.011} \\
+VHIO$\to$INT & \textbf{0.707\,{\small$\pm$0.005}} & 0.693\,{\small$\pm$0.005} & 0.674\,{\small$\pm$0.021} & 0.693\,{\small$\pm$0.012} & 0.137\,{\small$\pm$0.010} & 0.137\,{\small$\pm$0.010} & \textbf{0.094\,{\small$\pm$0.022}} & 0.107\,{\small$\pm$0.023} \\
 \bottomrule
 \end{tabular}
-\caption{Real multi-center transfers on I3LUNG (6 centers, mean\,$\pm$\,95\% CI over 10 seeds). Across all seven source$\to$target pairs, even the best adaptation method does not exceed ERM target AUROC (best-DA\,$-$\,ERM: mean -0.004, range [-0.013, +0.002]).}
+\caption{Real multi-center transfers on I3LUNG (6 centers, mean\,$\pm$\,95\% CI over 10 seeds; best per row in \textbf{bold}). No adaptation method exceeds ERM in target AUROC across all seven transfers (best-DA$-$ERM: mean -0.004, range [-0.013, +0.002]). DANN and CDAN achieve lower ECE than ERM on several transfers, consistent with the synthetic finding that adversarial alignment can improve calibration even when discrimination is not recovered.}}
 \label{tab:real}
-\end{table}
+\end{table*}

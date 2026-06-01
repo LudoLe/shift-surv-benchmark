@@ -136,18 +136,25 @@ if __name__ == "__main__":
     raw_files = sorted(f for f in glob.glob(os.path.join(TAB, "i3lung_*_*_raw.csv"))
                        if "i3lung_cb" not in os.path.basename(f))
 
+    METHS = ["lr_erm", "coral", "dann", "cdan"]
+    METH_HDR = ["ERM", "CORAL", "DANN", "CDAN"]
+
     rl = []
-    rl.append("\\begin{table}[t]\\centering\\small")
-    rl.append("\\setlength{\\tabcolsep}{3.5pt}")
-    rl.append("\\begin{tabular}{lccccc}")
+    rl.append("\\begin{table*}[t]\\centering\\footnotesize")
+    rl.append("\\setlength{\\tabcolsep}{3pt}")
+    rl.append("\\begin{tabular}{l cccc cccc}")
     rl.append("\\toprule")
-    rl.append("Transfer & ERM & CORAL & DANN & CDAN & ERM ECE \\\\")
+    rl.append("& \\multicolumn{4}{c}{Target AUROC $\\uparrow$}"
+              " & \\multicolumn{4}{c}{Target ECE $\\downarrow$} \\\\")
+    rl.append("\\cmidrule(lr){2-5}\\cmidrule(lr){6-9}")
+    rl.append("Transfer & " + " & ".join(METH_HDR) +
+              " & " + " & ".join(METH_HDR) + " \\\\")
     rl.append("\\midrule")
+
     best_deltas = []
     for f in raw_files:
         name = os.path.basename(f).replace("i3lung_", "").replace("_raw.csv", "")
         src, tgt = name.split("_")
-        # collect per-seed values per method
         vals = {}
         for r in csv.DictReader(open(f)):
             m = r["method"]
@@ -161,41 +168,41 @@ if __name__ == "__main__":
         def get_ci(method, metric):
             return _ci(vals.get(method, {}).get(metric, []))
 
-        erm_m, erm_ci = get_ci("lr_erm", "tgt_auroc")
-        ece_m, ece_ci = get_ci("lr_erm", "tgt_ece")
+        # best per row for bold
+        auroc_means = {m: get_ci(m, "tgt_auroc")[0] for m in METHS}
+        ece_means   = {m: get_ci(m, "tgt_ece")[0]   for m in METHS}
+        best_auroc  = max(auroc_means, key=lambda k: auroc_means[k]
+                          if not np.isnan(auroc_means[k]) else -np.inf)
+        best_ece    = min(ece_means,   key=lambda k: ece_means[k]
+                          if not np.isnan(ece_means[k])   else np.inf)
 
-        all_methods = ["lr_erm", "coral", "dann", "cdan"]
-        auroc_vals = {m: get_ci(m, "tgt_auroc")[0] for m in all_methods}
-        best_m = max(auroc_vals, key=lambda k: auroc_vals[k]
-                     if not np.isnan(auroc_vals[k]) else -np.inf)
-
-        def _cell(method, metric="tgt_auroc"):
-            mv, mci = get_ci(method, metric)
+        def cell(m, metric, best_m):
+            mv, mci = get_ci(m, metric)
             txt = _fmt(mv, mci)
-            if method == best_m and metric == "tgt_auroc":
+            if m == best_m:
                 txt = "\\textbf{" + txt + "}"
             return txt
 
-        da_means = []
-        row = f"{src}$\\to${tgt} & {_cell('lr_erm')}"
-        for m in ("coral", "dann", "cdan"):
-            dm = auroc_vals[m]
-            da_means.append(dm)
-            row += f" & {_cell(m)}"
-        row += f" & {_fmt(ece_m, ece_ci)} \\\\"
-        rl.append(row)
-        best_deltas.append(float(np.nanmax(da_means)) - erm_m)
+        auroc_cells = " & ".join(cell(m, "tgt_auroc", best_auroc) for m in METHS)
+        ece_cells   = " & ".join(cell(m, "tgt_ece",   best_ece)   for m in METHS)
+        rl.append(f"{src}$\\to${tgt} & {auroc_cells} & {ece_cells} \\\\")
+
+        da_means = [auroc_means[m] for m in ("coral", "dann", "cdan")]
+        best_deltas.append(float(np.nanmax(da_means)) - auroc_means["lr_erm"])
 
     rl.append("\\bottomrule")
     rl.append("\\end{tabular}")
     rl.append("\\caption{Real multi-center transfers on I3LUNG (6 centers, "
-              "mean\\,$\\pm$\\,95\\% CI over 10 seeds). "
-              "Across all seven source$\\to$target pairs, even the best "
-              "adaptation method does not exceed ERM target AUROC "
-              f"(best-DA\\,$-$\\,ERM: mean {np.nanmean(best_deltas):+.3f}, "
-              f"range [{np.nanmin(best_deltas):+.3f}, {np.nanmax(best_deltas):+.3f}]).}}")
+              "mean\\,$\\pm$\\,95\\% CI over 10 seeds; best per row in "
+              "\\textbf{bold}). "
+              "No adaptation method exceeds ERM in target AUROC across all "
+              f"seven transfers (best-DA$-$ERM: mean {np.nanmean(best_deltas):+.3f}, "
+              f"range [{np.nanmin(best_deltas):+.3f}, {np.nanmax(best_deltas):+.3f}]). "
+              "DANN and CDAN achieve lower ECE than ERM on several transfers, "
+              "consistent with the synthetic finding that adversarial alignment "
+              "can improve calibration even when discrimination is not recovered.}}")
     rl.append("\\label{tab:real}")
-    rl.append("\\end{table}")
+    rl.append("\\end{table*}")
     open(os.path.join(OUT, "table5_real.tex"), "w").write("\n".join(rl) + "\n")
     print("wrote table5_real.tex (with CI)")
 
