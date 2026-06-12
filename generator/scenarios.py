@@ -52,6 +52,7 @@ def generate_scenario(
     n_per_domain: int = 500,
     seed: int = 42,
     base: Optional[BaseParams] = None,
+    censoring_lambda: float = 0.0,
     **kwargs,
 ) -> dict:
     """
@@ -104,6 +105,15 @@ def generate_scenario(
         source_p, target_p = _strong_covariate_shift(source_params, target_id, n_per_domain, base, seed, **kwargs)
     elif name == "cure_shift":
         source_p, target_p = _cure_shift(source_params, target_id, n_per_domain, base, **kwargs)
+
+    # Optional independent exponential censoring (C ~ Exp(censoring_lambda)).
+    # The fixed-horizon benchmark leaves this at 0 (delta == 1 for all); the
+    # survival validity check (experiments/run_survival.py) turns it on so a
+    # Cox model is trained and scored on genuinely censored data.
+    if censoring_lambda > 0.0:
+        for sp in source_p:
+            sp.censoring_lambda = censoring_lambda
+        target_p.censoring_lambda = censoring_lambda
 
     source_datasets = gen.generate_domains(source_p)
     target_dataset = gen.generate_domain(target_p, domain_id=target_id)

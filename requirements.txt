@@ -10,3 +10,6 @@ matplotlib>=3.7
 # results are reported as mean ± 95% CI over seeds for this reason.
 tensorflow>=2.13
 adapt==0.4.5
+
+# Survival validity check (experiments/run_survival.py): Cox PH + censoring-aware metrics
+scikit-survival>=0.21
