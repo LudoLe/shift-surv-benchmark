@@ -31,6 +31,11 @@ Run:  PYTHONPATH=. python tests/test_iwcv_weight_fallback.py   (or: pytest -s)
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score

@@ -108,8 +108,13 @@ def _run_seed(
     feature_cols: list[str],
     seed: int,
     use_iwcv: bool = True,
-) -> list[dict]:
-    """Fit all methods for one seed; return list of result dicts."""
+) -> tuple[list[dict], np.ndarray]:
+    """Fit all methods for one seed.
+
+    Returns (results, y_tgt) where each result dict additionally carries
+    ``tgt_probs`` (target-domain positive-class probabilities, aligned to the
+    fixed target row order) so callers can run a patient-level bootstrap.
+    """
     from experiments.adaptation_methods import fit_coral, fit_dann, fit_cdan
     from experiments.baselines import fit_prior_recalib
 
@@ -148,6 +153,7 @@ def _run_seed(
         "method": "lr_erm",
         "source_pooled": _score(y_val, p_val),
         "target": _score(y_tgt, p_tgt),
+        "tgt_probs": np.asarray(p_tgt),
     })
 
     # --- IW-ERM (importance-weighted ERM) ---
@@ -166,6 +172,7 @@ def _run_seed(
         "method": "iw_erm",
         "source_pooled": _score(y_val, p_val_iw),
         "target": _score(y_tgt, p_tgt_iw),
+        "tgt_probs": np.asarray(p_tgt_iw),
     })
 
     # --- Prior recalibration ---
@@ -184,6 +191,7 @@ def _run_seed(
         "method": "prior_recalib",
         "source_pooled": _score(y_val, p_val),
         "target": _score(y_tgt, p_adj),
+        "tgt_probs": np.asarray(p_adj),
     })
 
     # --- Platt scaling (sigmoid calibration) ---
@@ -202,6 +210,7 @@ def _run_seed(
         "method": "platt_scaling",
         "source_pooled": _score(y_val, p_val_platt),
         "target": _score(y_tgt, p_tgt_platt),
+        "tgt_probs": np.asarray(p_tgt_platt),
     })
 
     # --- CORAL ---
@@ -219,6 +228,7 @@ def _run_seed(
         "method": "coral",
         "source_pooled": _score(y_val, p_val_c),
         "target": _score(y_tgt, p_tgt_c),
+        "tgt_probs": np.asarray(p_tgt_c),
     })
 
     # Build DomainDataset-compatible objects for DANN/CDAN
@@ -243,22 +253,26 @@ def _run_seed(
         r_dann = fit_dann(src_ds, tgt_ds, seed=seed, use_iwcv=use_iwcv)
         results.append({"method": "dann",
                         "source_pooled": r_dann.get("source_pooled", {}),
-                        "target": r_dann.get("target", {})})
+                        "target": r_dann.get("target", {}),
+                        "tgt_probs": np.asarray(r_dann.get("target_probs"))
+                        if r_dann.get("target_probs") is not None else None})
     except Exception as e:
         warnings.warn(f"DANN failed seed={seed}: {e}")
-        results.append({"method": "dann", "source_pooled": {}, "target": {}})
+        results.append({"method": "dann", "source_pooled": {}, "target": {}, "tgt_probs": None})
 
     # --- CDAN ---
     try:
         r_cdan = fit_cdan(src_ds, tgt_ds, seed=seed, use_iwcv=use_iwcv)
         results.append({"method": "cdan",
                         "source_pooled": r_cdan.get("source_pooled", {}),
-                        "target": r_cdan.get("target", {})})
+                        "target": r_cdan.get("target", {}),
+                        "tgt_probs": np.asarray(r_cdan.get("target_probs"))
+                        if r_cdan.get("target_probs") is not None else None})
     except Exception as e:
         warnings.warn(f"CDAN failed seed={seed}: {e}")
-        results.append({"method": "cdan", "source_pooled": {}, "target": {}})
+        results.append({"method": "cdan", "source_pooled": {}, "target": {}, "tgt_probs": None})
 
-    return results
+    return results, y_tgt
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +325,131 @@ def _aggregate_real(raw: list[dict]) -> list[dict]:
             row[f"{key}_ci95"] = round(tc * se, 4)
         agg.append(row)
     return agg
+
+
+# ---------------------------------------------------------------------------
+# Patient-level bootstrap (target-cohort sampling uncertainty)
+# ---------------------------------------------------------------------------
+
+def _bootstrap_real_gaps(
+    prob_by_method: dict[str, np.ndarray],
+    y_tgt: np.ndarray,
+    reference: str = "lr_erm",
+    n_boot: int = 2000,
+    seed: int = 0,
+    n_bins: int = 10,
+) -> list[dict]:
+    """Patient-level paired bootstrap of AUROC/ECE and gaps vs a reference method.
+
+    Why this exists
+    ---------------
+    The per-seed CIs in ``_aggregate_real`` vary only the source train/val split
+    and the network initialisation; the source and target *cohorts* are fixed, so
+    those CIs say nothing about how the result would change on a different sample
+    of target patients.  Here we instead resample target patients with replacement
+    to obtain CIs (and a p-value for each method-vs-reference gap) that reflect
+    target-cohort sampling uncertainty -- the quantity a clinical reviewer cares
+    about when asking "would this transfer to the next 430 patients?".
+
+    Protocol
+    --------
+    * ``prob_by_method[m]`` is an (n_seeds, n_tgt) array of target probabilities.
+      The target cohort is identical and identically ordered across seeds, so the
+      seeds are averaged into one ensemble probability per patient before
+      resampling (this removes split/init noise and isolates cohort sampling).
+    * For each of ``n_boot`` resamples, the SAME patient indices are used for
+      every method (paired bootstrap), so the gap distribution accounts for the
+      positive correlation between methods evaluated on the same patients.
+    * Gap sign convention: AUROC gap = method - reference (higher = method better);
+      ECE gap = reference - method (higher = method better, i.e. lower ECE).
+      The two-sided bootstrap p-value is 2*min(P(gap>0), P(gap<0)).
+    """
+    rng = np.random.default_rng(seed)
+    y = np.asarray(y_tgt).astype(int)
+    n = len(y)
+
+    ens = {m: np.asarray(P).mean(axis=0) for m, P in prob_by_method.items()
+           if P is not None and len(P) > 0}
+    if reference not in ens:
+        return []
+
+    # Bootstrap indices shared across methods (paired).
+    idx = rng.integers(0, n, size=(n_boot, n))
+
+    def _auroc_ece(yb, pb):
+        return auroc(yb, pb), ece(yb, pb, n_bins=n_bins)
+
+    boot = {m: {"auroc": [], "ece": [], "d_auroc": [], "d_ece": []} for m in ens}
+    for b in range(n_boot):
+        ib = idx[b]
+        yb = y[ib]
+        if len(np.unique(yb)) < 2:
+            continue  # AUROC undefined on a single-class resample
+        ref_au, ref_ec = _auroc_ece(yb, ens[reference][ib])
+        for m, p in ens.items():
+            au, ec = _auroc_ece(yb, p[ib])
+            boot[m]["auroc"].append(au)
+            boot[m]["ece"].append(ec)
+            boot[m]["d_auroc"].append(au - ref_au)        # method - ref
+            boot[m]["d_ece"].append(ref_ec - ec)          # ref - method
+
+    def _ci(v):
+        v = np.asarray(v, dtype=float)
+        return float(np.percentile(v, 2.5)), float(np.percentile(v, 97.5))
+
+    def _p_two_sided(v):
+        # Inclusive comparisons so probability mass exactly at 0 counts on both
+        # sides: a gap distribution centred at 0 (e.g. a method identical to the
+        # reference) yields p ≈ 1, while one cleanly shifted off 0 yields p ≈ 0.
+        v = np.asarray(v, dtype=float)
+        if len(v) == 0:
+            return float("nan")
+        frac_ge = float(np.mean(v >= 0))
+        frac_le = float(np.mean(v <= 0))
+        return float(min(1.0, 2.0 * min(frac_ge, frac_le)))
+
+    rows = []
+    for m, d in ens.items():
+        au_lo, au_hi = _ci(boot[m]["auroc"])
+        ec_lo, ec_hi = _ci(boot[m]["ece"])
+        dau_lo, dau_hi = _ci(boot[m]["d_auroc"])
+        dec_lo, dec_hi = _ci(boot[m]["d_ece"])
+        rows.append({
+            "method":          m,
+            "auroc":           round(float(auroc(y, ens[m])), 4),
+            "auroc_lo":        round(au_lo, 4),
+            "auroc_hi":        round(au_hi, 4),
+            "ece":             round(float(ece(y, ens[m], n_bins=n_bins)), 4),
+            "ece_lo":          round(ec_lo, 4),
+            "ece_hi":          round(ec_hi, 4),
+            "auroc_gap_vs_ref":   round(float(np.mean(boot[m]["d_auroc"])), 4),
+            "auroc_gap_lo":       round(dau_lo, 4),
+            "auroc_gap_hi":       round(dau_hi, 4),
+            "auroc_gap_p":        round(_p_two_sided(boot[m]["d_auroc"]), 4),
+            "ece_gap_vs_ref":     round(float(np.mean(boot[m]["d_ece"])), 4),
+            "ece_gap_lo":         round(dec_lo, 4),
+            "ece_gap_hi":         round(dec_hi, 4),
+            "ece_gap_p":          round(_p_two_sided(boot[m]["d_ece"]), 4),
+            "reference":          reference,
+            "n_boot":             n_boot,
+            "n_tgt":              n,
+        })
+    return rows
+
+
+def _print_bootstrap(rows: list[dict], source: str, target: str) -> None:
+    if not rows:
+        return
+    ref = rows[0]["reference"]
+    print(f"\n  PATIENT-LEVEL BOOTSTRAP — {source} → {target}  "
+          f"(n_boot={rows[0]['n_boot']}, gaps vs {ref}, 95% percentile CI)")
+    print(f"  {'method':16s}{'AUROC [95% CI]':26s}{'ΔAUROC vs ref (p)':26s}{'ECE [95% CI]':24s}{'ΔECE vs ref (p)':22s}")
+    for r in rows:
+        au  = f"{r['auroc']:.3f} [{r['auroc_lo']:.3f},{r['auroc_hi']:.3f}]"
+        dau = f"{r['auroc_gap_vs_ref']:+.3f} [{r['auroc_gap_lo']:+.3f},{r['auroc_gap_hi']:+.3f}] p={r['auroc_gap_p']:.3f}"
+        ec  = f"{r['ece']:.3f} [{r['ece_lo']:.3f},{r['ece_hi']:.3f}]"
+        dec = f"{r['ece_gap_vs_ref']:+.3f} p={r['ece_gap_p']:.3f}"
+        print(f"  {r['method']:16s}{au:26s}{dau:26s}{ec:24s}{dec:22s}")
 
 
 # ---------------------------------------------------------------------------
@@ -368,25 +507,43 @@ def run_real_data(
               f"{target_center}: {tgt_df['OS_6'].mean():.3f}")
 
     all_rows: list[dict] = []
+    prob_accum: dict[str, list[np.ndarray]] = {}
+    y_tgt_ref: np.ndarray | None = None
     for seed in seeds:
         if verbose:
             print(f"  [Seed {seed}]", flush=True)
-        results = _run_seed(src_df, tgt_df, feature_cols, seed=seed, use_iwcv=use_iwcv)
+        results, y_tgt = _run_seed(src_df, tgt_df, feature_cols, seed=seed, use_iwcv=use_iwcv)
+        y_tgt_ref = y_tgt
         for r in results:
             all_rows.append(_flatten_real(r, seed))
+            probs = r.get("tgt_probs")
+            if probs is not None and np.asarray(probs).size == len(y_tgt):
+                prob_accum.setdefault(r["method"], []).append(np.asarray(probs))
 
     agg = _aggregate_real(all_rows)
+
+    # Patient-level bootstrap: stack per-seed probabilities (target cohort is
+    # fixed and identically ordered across seeds) and resample patients.
+    boot_rows: list[dict] = []
+    if y_tgt_ref is not None:
+        prob_by_method = {m: np.vstack(P) for m, P in prob_accum.items() if P}
+        boot_rows = _bootstrap_real_gaps(prob_by_method, y_tgt_ref, reference="lr_erm")
 
     _TABLES.mkdir(parents=True, exist_ok=True)
     save_table_csv(all_rows, _TABLES / f"{out_prefix}_raw.csv")
     save_table_csv(agg,      _TABLES / f"{out_prefix}_summary.csv")
+    if boot_rows:
+        save_table_csv(boot_rows, _TABLES / f"{out_prefix}_bootstrap.csv")
 
     if verbose:
         _print_real_results(agg, len(seeds), source_center, target_center)
+        _print_bootstrap(boot_rows, source_center, target_center)
         print(f"\n  Saved: {_TABLES}/{out_prefix}_raw.csv")
         print(f"  Saved: {_TABLES}/{out_prefix}_summary.csv")
+        if boot_rows:
+            print(f"  Saved: {_TABLES}/{out_prefix}_bootstrap.csv")
 
-    return {"raw": all_rows, "aggregated": agg}
+    return {"raw": all_rows, "aggregated": agg, "bootstrap": boot_rows}
 
 
 # ---------------------------------------------------------------------------

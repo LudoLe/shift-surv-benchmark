@@ -1,7 +1,20 @@
-# SHIFT-SURV: A Synthetic Benchmark for Distribution Shift in Survival Analysis
+# SHIFT-SURV: A Synthetic Benchmark for Distribution Shift in Fixed-Horizon Survival Risk Prediction
 
 Synthetic benchmark for studying how covariate shift, concept shift, baseline hazard shift,
-and spurious correlations affect survival models transported across clinical sites.
+and spurious correlations affect **fixed-horizon survival-risk models** transported across
+clinical sites.
+
+## Scope
+
+The data-generating process is a Weibull proportional-hazards survival model (see
+[Generator](#generator)), but the prediction task evaluated here is **fixed-horizon binary
+classification**: the label is `y = 1[T ≤ τ]` (event by τ = 6 months) and every method is a
+classifier of that label. The benchmark therefore measures transportability of fixed-horizon
+*risk* under multi-center shift, not estimation of the full survival curve. The main benchmark
+is **uncensored** (every event time is observed before τ); the generator additionally supports
+independent censoring and a mixture-cure model, used only by the appendix `cure_shift` scenario.
+We do not fit time-to-event models (Cox, RSF, DeepSurv) — extending the protocol to censored,
+curve-level evaluation is left as future work.
 
 ## Setup
 
