@@ -82,13 +82,21 @@ def _surv_y(ds) -> np.ndarray:
 
 
 def _score_target(
-    model, scaler, X_eval, y_eval, y_train, tau: float,
+    model, scaler, X_eval, y_eval, tau: float,
 ) -> dict:
     """C-index, time-dependent AUC at tau, and IBS over [0, tau] on one split.
 
-    td_auc and ibs require evaluation times to lie strictly inside the test
-    follow-up; both are wrapped so a degenerate split yields NaN rather than
-    aborting the whole run.
+    IPCW reference
+    --------------
+    cumulative_dynamic_auc and integrated_brier_score reweight by the inverse
+    censoring probability, estimated from a reference cohort. We use the
+    *evaluation cohort itself* as that reference (``y_eval`` for both train and
+    test arguments). This is the correct choice: IPCW corrects for censoring in
+    the cohort being scored and is independent of the model. Using the source
+    training split instead breaks when the target follow-up extends beyond it
+    ("censoring survival function is zero" / "time must be smaller than largest
+    observed time point"), which silently dropped ~40% of seeds. The td-AUC and
+    IBS are still wrapped so a genuinely degenerate split yields NaN.
     """
     Xs   = scaler.transform(X_eval)
     risk = model.predict(Xs)                      # higher = higher risk
@@ -101,9 +109,8 @@ def _score_target(
     # Time-dependent AUC at tau -- the bridge to the fixed-horizon AUROC
     td = float("nan")
     try:
-        t_max = float(y_eval["time"][y_eval["event"]].max())
-        if tau < t_max:
-            auc, _ = cumulative_dynamic_auc(y_train, y_eval, risk, np.array([tau]))
+        if tau < float(y_eval["time"].max()):
+            auc, _ = cumulative_dynamic_auc(y_eval, y_eval, risk, np.array([tau]))
             td = float(np.atleast_1d(auc)[0])
     except Exception:
         pass
@@ -112,13 +119,11 @@ def _score_target(
     ibs = float("nan")
     try:
         times = np.linspace(0.25, tau, 12)
-        t_lo = float(max(y_eval["time"].min(), y_train["time"].min()))
-        t_hi = float(min(y_eval["time"].max(), y_train["time"].max()))
-        times = times[(times > t_lo) & (times < t_hi)]
+        times = times[(times > float(y_eval["time"].min())) & (times < float(y_eval["time"].max()))]
         if len(times) >= 3:
             surv_fns = model.predict_survival_function(Xs)
             preds = np.row_stack([[fn(t) for t in times] for fn in surv_fns])
-            ibs = float(integrated_brier_score(y_train, y_eval, preds, times))
+            ibs = float(integrated_brier_score(y_eval, y_eval, preds, times))
     except Exception:
         pass
 
@@ -146,8 +151,8 @@ def _fit_cox(feature_attr: str, src, tgt, tau: float) -> dict:
         model.fit(X_tr, y_tr)
 
     y_val = _surv_y_subset(src, idx_val)
-    src_score = _score_target(model, scaler, X_all[idx_val], y_val, y_tr, tau)
-    tgt_score = _score_target(model, scaler, getattr(tgt, feature_attr), _surv_y(tgt), y_tr, tau)
+    src_score = _score_target(model, scaler, X_all[idx_val], y_val, tau)
+    tgt_score = _score_target(model, scaler, getattr(tgt, feature_attr), _surv_y(tgt), tau)
     return {"source": src_score, "target": tgt_score}
 
 
