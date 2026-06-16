@@ -29,13 +29,20 @@ SCEN_LBL = {
     "baseline_hazard_shift": "Baseline hazard", "concept_shift": "Concept",
     "shape_shift": "Shape",
 }
-METH = ["invariant_oracle", "all_observed", "coral", "prior_recalib",
-        "platt_scaling", "dann", "cdan"]
+# Table 3 (AUROC): Prior-EM and Platt omitted — they are rank-preserving
+# transformations of ERM scores, so AUROC is mathematically identical to ERM.
+METH_AUROC = ["invariant_oracle", "all_observed", "coral", "dann", "cdan"]
+# Table 4 (ECE): all methods included — calibration baselines are informative here.
+METH_ECE   = ["invariant_oracle", "all_observed", "coral", "prior_recalib",
+              "platt_scaling", "dann", "cdan"]
 METH_LBL = {
     "invariant_oracle": "Oracle", "all_observed": "ERM", "coral": "CORAL",
     "prior_recalib": "Prior-EM", "platt_scaling": "Platt",
     "dann": "DANN", "cdan": "CDAN",
 }
+
+
+from scipy import stats as _stats
 
 
 def load(path):
@@ -45,6 +52,34 @@ def load(path):
             key = (r.get("scenario", ""), r["method"])
             d[key] = r
     return d
+
+
+def load_raw_synth(path):
+    """Returns {(scenario, method): [per-seed metric values]}  for tgt_auroc and tgt_ece."""
+    d = {}
+    with open(path) as f:
+        for r in csv.DictReader(f):
+            sc, m = r.get("scenario", ""), r["method"]
+            for metric in ("tgt_auroc", "tgt_ece"):
+                key = (sc, m, metric)
+                d.setdefault(key, [])
+                try:
+                    d[key].append(float(r[metric]))
+                except (ValueError, KeyError):
+                    pass
+    return d
+
+
+def _pstars(v_erm, v_da):
+    """Paired t-test (across seeds) vs ERM; empty string if not significant."""
+    n = min(len(v_erm), len(v_da))
+    if n < 2:
+        return ""
+    _, p = _stats.ttest_rel(v_erm[:n], v_da[:n])
+    if p <= 0.001: return "$^{***}$"
+    if p <= 0.01:  return "$^{**}$"
+    if p <= 0.05:  return "$^{*}$"
+    return ""
 
 
 def fnum(r, k):
@@ -59,29 +94,35 @@ def _cell(r, base):
     return f"{m:.3f}\\,$\\pm$\\,{c:.3f}"
 
 
-def make_synth_table(A, metric, caption, label, bold_min=False):
-    """scenario x method table for a synthetic metric (tgt_auroc / tgt_ece)."""
+def make_synth_table(A, R, metric, caption, label, bold_min=False, meth=None):
+    """scenario x method table for a synthetic metric (tgt_auroc / tgt_ece).
+    R: raw per-seed dict from load_raw_synth; None to skip significance stars.
+    """
+    if meth is None:
+        meth = METH_ECE
     lines = []
     lines.append("\\begin{table*}[t]\\centering\\small")
     lines.append("\\setlength{\\tabcolsep}{4pt}")
-    lines.append("\\begin{tabular}{l" + "c" * len(METH) + "}")
+    lines.append("\\begin{tabular}{l" + "c" * len(meth) + "}")
     lines.append("\\toprule")
-    lines.append("Scenario & " + " & ".join(METH_LBL[m] for m in METH) + " \\\\")
+    lines.append("Scenario & " + " & ".join(METH_LBL[m] for m in meth) + " \\\\")
     lines.append("\\midrule")
     for sc in SCEN:
         cells = []
-        # bold: highest AUROC (bold_min=False) or lowest ECE (bold_min=True),
-        # excluding oracle and any NaN entries.
         vals = {m: fnum(A.get((sc, m)), metric + "_mean")
-                for m in METH if m != "invariant_oracle"}
+                for m in meth if m != "invariant_oracle"}
         finite = {m: v for m, v in vals.items() if not np.isnan(v)}
         if finite:
             best = min(finite, key=finite.__getitem__) if bold_min \
                    else max(finite, key=finite.__getitem__)
         else:
             best = None
-        for m in METH:
+        erm_seeds = R.get((sc, "all_observed", metric), []) if R else []
+        for m in meth:
             txt = _cell(A.get((sc, m)), metric)
+            if R and m not in ("invariant_oracle", "all_observed"):
+                da_seeds = R.get((sc, m, metric), [])
+                txt += _pstars(erm_seeds, da_seeds)
             if best and m == best:
                 txt = "\\textbf{" + txt + "}"
             cells.append(txt)
@@ -96,27 +137,35 @@ def make_synth_table(A, metric, caption, label, bold_min=False):
 
 if __name__ == "__main__":
     A = load(os.path.join(TAB, "benchmark_1s1t_iwcv_summary.csv"))
+    R = load_raw_synth(os.path.join(TAB, "benchmark_1s1t_iwcv_raw.csv"))
 
+    STAR_NOTE = (" Superscripts on non-ERM cells: $^{*}p{<}0.05$,"
+                 " $^{**}p{<}0.01$, $^{***}p{<}0.001$"
+                 " (paired $t$-test vs ERM across seeds).")
+
+    # Table 3: AUROC — Prior-EM and Platt excluded (rank-preserving → AUROC ≡ ERM)
     t3 = make_synth_table(
-        A, "tgt_auroc",
+        A, R, "tgt_auroc",
         "Target AUROC (mean\\,$\\pm$\\,95\\% CI over 10 seeds) on the synthetic benchmark. "
-        "Best non-oracle method per row in \\textbf{bold}. No adaptation method exceeds ERM "
-        "on any shift, despite large oracle headroom.",
-        "tab:auroc")
+        "Prior-EM and Platt scaling are omitted: as rank-preserving transformations of ERM "
+        "scores their AUROC is identical to ERM by construction. "
+        "Best non-oracle per row in \\textbf{bold}." + STAR_NOTE,
+        "tab:auroc", meth=METH_AUROC)
     open(os.path.join(OUT, "table3_auroc.tex"), "w").write(t3 + "\n")
 
+    # Table 4: ECE — all methods included (calibration baselines are informative here)
     t4 = make_synth_table(
-        A, "tgt_ece",
+        A, R, "tgt_ece",
         "Target ECE (mean\\,$\\pm$\\,95\\% CI over 10 seeds; lower is better). "
-        "Best non-oracle method per row in \\textbf{bold}. Calibration degrades independently "
-        "of discrimination: baseline-hazard shift leaves AUROC near-intact yet yields the worst ECE.",
-        "tab:ece", bold_min=True)
+        "Best non-oracle per row in \\textbf{bold}. Calibration degrades independently "
+        "of discrimination: baseline-hazard shift leaves AUROC near-intact yet yields the worst ECE."
+        + STAR_NOTE,
+        "tab:ece", bold_min=True, meth=METH_ECE)
     open(os.path.join(OUT, "table4_ece.tex"), "w").write(t4 + "\n")
 
     print("wrote table3_auroc.tex, table4_ece.tex")
 
-    # ---- Table 5: real I3LUNG transfers (mean ± 95% CI from raw per-seed data) ----
-    from scipy import stats as _stats
+    # ---- Tables 5a/5b: real I3LUNG transfers split into AUROC and ECE ----
 
     def _ci(vals):
         """Return (mean, ci95_half) from a list of per-seed values."""
@@ -133,25 +182,27 @@ if __name__ == "__main__":
             return "--"
         return f"{m:.3f}\\,{{\\small$\\pm${ci:.3f}}}"
 
+    def _pstars(v_erm, v_da):
+        """Paired t-test stars vs ERM; empty string if not significant."""
+        v_erm = [v for v in v_erm if not np.isnan(v)]
+        v_da  = [v for v in v_da  if not np.isnan(v)]
+        n = min(len(v_erm), len(v_da))
+        if n < 2:
+            return ""
+        _, p = _stats.ttest_rel(v_erm[:n], v_da[:n])
+        if p <= 0.001: return "$^{***}$"
+        if p <= 0.01:  return "$^{**}$"
+        if p <= 0.05:  return "$^{*}$"
+        return ""
+
     raw_files = sorted(f for f in glob.glob(os.path.join(TAB, "i3lung_*_*_raw.csv"))
                        if "i3lung_cb" not in os.path.basename(f))
 
-    METHS = ["lr_erm", "coral", "dann", "cdan"]
+    METHS    = ["lr_erm", "coral", "dann", "cdan"]
     METH_HDR = ["ERM", "CORAL", "DANN", "CDAN"]
 
-    rl = []
-    rl.append("\\begin{table*}[t]\\centering\\footnotesize")
-    rl.append("\\setlength{\\tabcolsep}{3pt}")
-    rl.append("\\begin{tabular}{l cccc cccc}")
-    rl.append("\\toprule")
-    rl.append("& \\multicolumn{4}{c}{Target AUROC $\\uparrow$}"
-              " & \\multicolumn{4}{c}{Target ECE $\\downarrow$} \\\\")
-    rl.append("\\cmidrule(lr){2-5}\\cmidrule(lr){6-9}")
-    rl.append("Transfer & " + " & ".join(METH_HDR) +
-              " & " + " & ".join(METH_HDR) + " \\\\")
-    rl.append("\\midrule")
-
-    best_deltas = []
+    # parse all transfer data once
+    transfers = []
     for f in raw_files:
         name = os.path.basename(f).replace("i3lung_", "").replace("_raw.csv", "")
         src, tgt = name.split("_")
@@ -164,32 +215,146 @@ if __name__ == "__main__":
                     vals[m][k].append(float(r[k]))
                 except (ValueError, KeyError):
                     pass
+        transfers.append((src, tgt, vals))
 
-        def get_ci(method, metric):
-            return _ci(vals.get(method, {}).get(metric, []))
+    # Bootstrap-based real tables (cohort-level CI + p-values), aligned with
+    # fig4. Reads i3lung_*_*_bootstrap.csv: point estimate + 2.5/97.5 percentile
+    # CI over target-patient resampling, and the bootstrap p-value of the gap vs
+    # ERM. Supersedes the per-seed t-test, which reflected only the train/val
+    # split rather than target-cohort sampling.
+    boot_files = sorted(f for f in glob.glob(os.path.join(TAB, "i3lung_*_*_bootstrap.csv"))
+                        if "i3lung_cb" not in os.path.basename(f))
+    boot_transfers = []
+    for f in boot_files:
+        name = os.path.basename(f).replace("i3lung_", "").replace("_bootstrap.csv", "")
+        src, tgt = name.split("_")
+        bvals = {}
+        for r in csv.DictReader(open(f)):
+            def g(k):
+                try:
+                    return float(r[k])
+                except (ValueError, KeyError):
+                    return np.nan
+            bvals[r["method"]] = {
+                "auroc": g("auroc"), "auroc_lo": g("auroc_lo"), "auroc_hi": g("auroc_hi"),
+                "auroc_p": g("auroc_gap_p"),
+                "ece": g("ece"), "ece_lo": g("ece_lo"), "ece_hi": g("ece_hi"),
+                "ece_p": g("ece_gap_p"),
+            }
+        boot_transfers.append((src, tgt, bvals))
 
-        # best per row for bold
+    def _bstars(p):
+        if np.isnan(p): return ""
+        if p <= 0.001:  return "$^{***}$"
+        if p <= 0.01:   return "$^{**}$"
+        if p <= 0.05:   return "$^{*}$"
+        return ""
+
+    def _bfmt(m, lo, hi):
+        if np.isnan(m):
+            return "--"
+        return f"{m:.3f}\\,{{\\small[{lo:.3f},\\,{hi:.3f}]}}"
+
+    def build_real_table(metric, bold_min, caption, label, fname):
+        """metric in {'auroc','ece'}; uses bootstrap point estimate + CI + gap p."""
+        rl = []
+        rl.append("\\begin{table*}[t]\\centering\\footnotesize")
+        rl.append("\\setlength{\\tabcolsep}{4pt}")
+        rl.append("\\begin{tabular}{l " + "c" * len(METHS) + "}")
+        rl.append("\\toprule")
+        rl.append("Transfer & " + " & ".join(METH_HDR) + " \\\\")
+        rl.append("\\midrule")
+
+        best_deltas = []
+        for src, tgt, bvals in boot_transfers:
+            means = {m: bvals.get(m, {}).get(metric, np.nan) for m in METHS}
+            if bold_min:
+                best_m = min(means, key=lambda k: means[k]
+                             if not np.isnan(means[k]) else np.inf)
+            else:
+                best_m = max(means, key=lambda k: means[k]
+                             if not np.isnan(means[k]) else -np.inf)
+
+            cells = []
+            for m in METHS:
+                b = bvals.get(m, {})
+                txt = _bfmt(b.get(metric, np.nan),
+                            b.get(f"{metric}_lo", np.nan), b.get(f"{metric}_hi", np.nan))
+                if m != "lr_erm":
+                    txt += _bstars(b.get(f"{metric}_p", np.nan))
+                if m == best_m:
+                    txt = "\\textbf{" + txt + "}"
+                cells.append(txt)
+            rl.append(f"{src}$\\to${tgt} & " + " & ".join(cells) + " \\\\")
+
+            if not bold_min:
+                da_means = [means[m] for m in ("coral", "dann", "cdan")]
+                best_deltas.append(float(np.nanmax(da_means)) - means["lr_erm"])
+
+        rl.append("\\bottomrule")
+        rl.append("\\end{tabular}")
+        if best_deltas:
+            extra = (f" Best-DA$-$ERM: mean {np.nanmean(best_deltas):+.3f}, "
+                     f"range [{np.nanmin(best_deltas):+.3f}, {np.nanmax(best_deltas):+.3f}].")
+        else:
+            extra = ""
+        rl.append(f"\\caption{{{caption}{extra}"
+                  " Superscripts on non-ERM cells: $^{{*}}p{<}0.05$,"
+                  " $^{{**}}p{<}0.01$, $^{{***}}p{<}0.001$ (two-sided bootstrap,"
+                  " gap vs ERM over target-patient resampling).}}")
+        rl.append(f"\\label{{{label}}}")
+        rl.append("\\end{table*}")
+        open(os.path.join(OUT, fname), "w").write("\n".join(rl) + "\n")
+        print(f"wrote {fname}")
+
+    build_real_table(
+        "auroc", bold_min=False,
+        caption=("Real multi-center transfers on I3LUNG, target AUROC $\\uparrow$"
+                 " (point estimate, 95\\% bootstrap CI [2.5, 97.5] over target patients;"
+                 " best per row in \\textbf{bold})."),
+        label="tab:real_auroc",
+        fname="table5a_real_auroc.tex")
+
+    build_real_table(
+        "ece", bold_min=True,
+        caption=("Real multi-center transfers on I3LUNG, target ECE $\\downarrow$"
+                 " (point estimate, 95\\% bootstrap CI [2.5, 97.5] over target patients;"
+                 " best per row in \\textbf{bold})."),
+        label="tab:real_ece",
+        fname="table5b_real_ece.tex")
+
+    # keep legacy combined table for backward compatibility
+    rl = []
+    rl.append("\\begin{table*}[t]\\centering\\footnotesize")
+    rl.append("\\setlength{\\tabcolsep}{3pt}")
+    rl.append("\\begin{tabular}{l cccc cccc}")
+    rl.append("\\toprule")
+    rl.append("& \\multicolumn{4}{c}{Target AUROC $\\uparrow$}"
+              " & \\multicolumn{4}{c}{Target ECE $\\downarrow$} \\\\")
+    rl.append("\\cmidrule(lr){2-5}\\cmidrule(lr){6-9}")
+    rl.append("Transfer & " + " & ".join(METH_HDR) +
+              " & " + " & ".join(METH_HDR) + " \\\\")
+    rl.append("\\midrule")
+    best_deltas = []
+    for src, tgt, vals in transfers:
+        get_ci = lambda m, metric: _ci(vals.get(m, {}).get(metric, []))
         auroc_means = {m: get_ci(m, "tgt_auroc")[0] for m in METHS}
         ece_means   = {m: get_ci(m, "tgt_ece")[0]   for m in METHS}
         best_auroc  = max(auroc_means, key=lambda k: auroc_means[k]
                           if not np.isnan(auroc_means[k]) else -np.inf)
         best_ece    = min(ece_means,   key=lambda k: ece_means[k]
                           if not np.isnan(ece_means[k])   else np.inf)
-
         def cell(m, metric, best_m):
             mv, mci = get_ci(m, metric)
             txt = _fmt(mv, mci)
             if m == best_m:
                 txt = "\\textbf{" + txt + "}"
             return txt
-
         auroc_cells = " & ".join(cell(m, "tgt_auroc", best_auroc) for m in METHS)
         ece_cells   = " & ".join(cell(m, "tgt_ece",   best_ece)   for m in METHS)
         rl.append(f"{src}$\\to${tgt} & {auroc_cells} & {ece_cells} \\\\")
-
         da_means = [auroc_means[m] for m in ("coral", "dann", "cdan")]
         best_deltas.append(float(np.nanmax(da_means)) - auroc_means["lr_erm"])
-
     rl.append("\\bottomrule")
     rl.append("\\end{tabular}")
     rl.append("\\caption{Real multi-center transfers on I3LUNG (6 centers, "

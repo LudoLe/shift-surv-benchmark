@@ -1,0 +1,18 @@
+\begin{table*}[t]\centering\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{l cccc}
+\toprule
+Transfer & ERM & CORAL & DANN & CDAN \\
+\midrule
+GHD$\to$INT & 0.731\,{\small[0.691,\,0.770]} & 0.724\,{\small[0.685,\,0.764]}$^{**}$ & \textbf{0.739\,{\small[0.699,\,0.777]}} & 0.738\,{\small[0.699,\,0.777]} \\
+INT$\to$GHD & 0.640\,{\small[0.588,\,0.691]} & 0.639\,{\small[0.587,\,0.689]} & 0.648\,{\small[0.596,\,0.699]} & \textbf{0.648\,{\small[0.596,\,0.699]}} \\
+INT$\to$MH & 0.723\,{\small[0.625,\,0.807]} & 0.717\,{\small[0.619,\,0.803]} & \textbf{0.734\,{\small[0.636,\,0.820]}} & 0.718\,{\small[0.617,\,0.806]} \\
+INT$\to$SZMC & 0.693\,{\small[0.603,\,0.778]} & 0.685\,{\small[0.591,\,0.772]} & 0.699\,{\small[0.605,\,0.788]} & \textbf{0.701\,{\small[0.606,\,0.788]}} \\
+INT$\to$UOC & \textbf{0.713\,{\small[0.632,\,0.785]}} & 0.712\,{\small[0.635,\,0.783]} & 0.701\,{\small[0.623,\,0.775]} & 0.706\,{\small[0.628,\,0.776]} \\
+INT$\to$VHIO & 0.725\,{\small[0.648,\,0.796]} & \textbf{0.727\,{\small[0.650,\,0.799]}} & 0.708\,{\small[0.630,\,0.781]} & 0.715\,{\small[0.638,\,0.788]} \\
+VHIO$\to$INT & 0.708\,{\small[0.669,\,0.747]} & 0.693\,{\small[0.654,\,0.733]}$^{***}$ & 0.704\,{\small[0.665,\,0.743]} & \textbf{0.709\,{\small[0.671,\,0.749]}} \\
+\bottomrule
+\end{tabular}
+\caption{Real multi-center transfers on I3LUNG, target AUROC $\uparrow$ (point estimate, 95\% bootstrap CI [2.5, 97.5] over target patients; best per row in \textbf{bold}). Best-DA$-$ERM: mean +0.005, range [-0.001, +0.011]. Superscripts on non-ERM cells: $^{{*}}p{<}0.05$, $^{{**}}p{<}0.01$, $^{{***}}p{<}0.001$ (two-sided bootstrap, gap vs ERM over target-patient resampling).}}
+\label{tab:real_auroc}
+\end{table*}
