@@ -19,13 +19,27 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 unset VIRTUAL_ENV || true
 
 CONDA_BASE="$(conda info --base)"
-ENV_PREFIX="$CONDA_BASE/envs/$ENV_NAME"
 
-echo "=== Creating conda env '$ENV_NAME' (Python 3.10) ==="
-conda create -y -n "$ENV_NAME" python=3.10
+# Create the env only if missing (idempotent re-runs).
+if conda env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
+  echo "=== Conda env '$ENV_NAME' already exists — reusing ==="
+else
+  echo "=== Creating conda env '$ENV_NAME' (Python 3.10) ==="
+  conda create -y -n "$ENV_NAME" python=3.10
+fi
+
+# Resolve the env's REAL prefix (user envs often live in ~/.conda/envs, not
+# $CONDA_BASE/envs when the base install is not user-writable).
+ENV_PREFIX="$(conda env list | awk -v n="$ENV_NAME" '$1==n{print $NF}')"
+if [[ -z "${ENV_PREFIX:-}" || ! -x "$ENV_PREFIX/bin/python" ]]; then
+  for cand in "$CONDA_BASE/envs/$ENV_NAME" "$HOME/.conda/envs/$ENV_NAME"; do
+    [[ -x "$cand/bin/python" ]] && ENV_PREFIX="$cand" && break
+  done
+fi
 
 # Install with the env's explicit interpreter (bypasses PATH / venv interference).
 PY="$ENV_PREFIX/bin/python"
+[[ -x "$PY" ]] || { echo "ERROR: python not found for env '$ENV_NAME' (looked in '$ENV_PREFIX')"; exit 1; }
 echo "=== Using interpreter: $PY ==="
 "$PY" --version
 "$PY" -m pip install --upgrade pip
