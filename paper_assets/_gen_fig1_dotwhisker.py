@@ -1,5 +1,7 @@
 """
-Generate fig1_divergence (dot-and-whisker, Nature style).
+Generate fig1_divergence: scatter plot AUROC gap (x) vs ECE gap (y).
+Each scenario = one dot, colored distinctly, with x/y error bars (95% CI).
+Shows that discrimination and calibration degrade independently.
 Run from repo root:  python paper_assets/_gen_fig1_dotwhisker.py
 """
 import csv, os
@@ -7,13 +9,11 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 
 ROOT    = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SUMMARY = os.path.join(ROOT, "outputs", "tables", "benchmark_1s1t_iwcv_summary.csv")
 OUT     = os.path.join(ROOT, "paper_assets")
 
-# ── scenario config (y-axis order: top → bottom) ──────────────────────────────
 SCENARIOS = [
     ("covariate_shift",       "Covariate"),
     ("observational_shift",   "Measurement"),
@@ -22,32 +22,38 @@ SCENARIOS = [
     ("concept_shift",         "Concept"),
 ]
 
-# alternating band tints (index 0 = topmost row)
-BAND_TINTS = ["#eef2f7", "#ffffff", "#eef2f7", "#ffffff", "#eef2f7"]
+# per-scenario colors
+COLORS = ["#E74C3C", "#E67E22", "#27AE60", "#2980B9", "#8E44AD"]
 
-# ── style ──────────────────────────────────────────────────────────────────────
+# manual label offsets (dx, dy) to avoid overlap with dots
+LABEL_OFFSETS = {
+    "Covariate":        (  6,  -12),
+    "Measurement":      (  6,    5),
+    "Spurious":         (  6,   -4),
+    "Baseline hazard":  ( -8,   -14),
+    "Concept":          (  6,    5),
+}
+
 plt.rcParams.update({
-    "font.family":        "serif",
-    "font.serif":        ["Latin Modern Roman", "Computer Modern Roman",
-                          "Times New Roman", "DejaVu Serif"],
-    "font.size":          9,
-    "axes.labelsize":     9,
-    "xtick.labelsize":    8,
-    "ytick.labelsize":    9,
-    "legend.fontsize":    8,
-    "axes.linewidth":     0.6,
-    "xtick.major.width":  0.6,
-    "ytick.major.width":  0,
-    "xtick.major.size":   3,
-    "ytick.major.size":   0,
-    "axes.spines.top":    False,
-    "axes.spines.right":  False,
-    "axes.spines.left":   False,
-    "axes.facecolor":     "white",
-    "figure.facecolor":   "white",
+    "font.family":      "serif",
+    "font.serif":      ["Latin Modern Roman", "Computer Modern Roman",
+                        "Times New Roman", "DejaVu Serif"],
+    "font.size":        9,
+    "axes.labelsize":   9,
+    "xtick.labelsize":  8,
+    "ytick.labelsize":  8,
+    "axes.linewidth":   0.6,
+    "xtick.major.width": 0.6,
+    "ytick.major.width": 0.6,
+    "xtick.major.size": 3,
+    "ytick.major.size": 3,
+    "axes.spines.top":   False,
+    "axes.spines.right": False,
+    "axes.facecolor":   "white",
+    "figure.facecolor": "white",
 })
 
-# ── data helpers ───────────────────────────────────────────────────────────────
+
 def load(path):
     d = {}
     with open(path) as f:
@@ -55,92 +61,49 @@ def load(path):
             d[(r["scenario"], r["method"])] = r
     return d
 
-def get(A, sc, m, base):
+
+def get_val(A, sc, m, key):
     r = A.get((sc, m))
     if not r:
-        return np.nan, np.nan, np.nan
-    mn = r.get(base + "_mean", "")
-    ci = r.get(base + "_ci95",  "0")
-    mn = float(mn) if mn not in ("", "nan") else np.nan
+        return np.nan, 0.0
+    v  = r.get(key + "_mean", "")
+    ci = r.get(key + "_ci95",  "0")
+    v  = float(v)  if v  not in ("", "nan") else np.nan
     ci = float(ci) if ci not in ("", "nan") else 0.0
-    return mn, mn - ci, mn + ci
+    return v, ci
 
 
-# ── figure ─────────────────────────────────────────────────────────────────────
 def make(A):
-    n      = len(SCENARIOS)
-    keys   = [k for k, _ in SCENARIOS]
-    labels = [l for _, l in SCENARIOS]
-    # y positions: top-most scenario = y = n-1, bottom = y = 0
-    yi     = np.arange(n - 1, -1, -1, dtype=float)
+    fig, ax = plt.subplots(figsize=(4.2, 3.4))
+    fig.subplots_adjust(left=0.13, right=0.97, top=0.97, bottom=0.12)
 
-    # collect data
-    gap_m,  gap_lo,  gap_hi  = zip(*[get(A, k, "all_observed", "gap")     for k in keys])
-    ece_m,  ece_lo,  ece_hi  = zip(*[get(A, k, "all_observed", "tgt_ece") for k in keys])
+    for (sc, lbl), col in zip(SCENARIOS, COLORS):
+        auroc_gap, auroc_ci = get_val(A, sc, "all_observed", "gap")
+        ece_erm,   ece_ci   = get_val(A, sc, "all_observed", "tgt_ece")
+        ece_orc,   _        = get_val(A, sc, "invariant_oracle", "tgt_ece")
+        ece_gap = ece_erm - ece_orc   # positive = worse calibration than oracle
 
-    # ── layout ─────────────────────────────────────────────────────────────
-    fig = plt.figure(figsize=(5.8, 2.05))
-    # manual placement: left panel narrower (gap can be negative), right wider
-    axA = fig.add_axes([0.195, 0.13, 0.335, 0.82])
-    axB = fig.add_axes([0.565, 0.13, 0.415, 0.82])
+        ax.errorbar(auroc_gap, ece_gap,
+                    xerr=auroc_ci, yerr=ece_ci,
+                    fmt="o", color=col, ms=7, markeredgewidth=0,
+                    elinewidth=0.9, capsize=0, zorder=3)
 
-    # ── shared horizontal bands ─────────────────────────────────────────────
-    half = 0.5
-    for ax in (axA, axB):
-        for i, (yy, tint) in enumerate(zip(yi, BAND_TINTS)):
-            ax.axhspan(yy - half, yy + half, color=tint,
-                       linewidth=0, zorder=0)
+        dx, dy = LABEL_OFFSETS.get(lbl, (6, 4))
+        ax.annotate(lbl, (auroc_gap, ece_gap),
+                    xytext=(dx, dy), textcoords="offset points",
+                    fontsize=8, color=col, va="center")
 
-    # ── dots and whiskers ──────────────────────────────────────────────────
-    DOT_COLOR = "#1a1a2e"
-    DOT_MS    = 4.8
-    EKW       = dict(elinewidth=0.9, capsize=0)   # Nature: no caps
+    ax.axhline(0, color="#cccccc", lw=0.7, ls="--", zorder=1)
+    ax.axvline(0, color="#cccccc", lw=0.7, ls="--", zorder=1)
 
-    def draw_dots(ax, means, los, his):
-        for yy, mn, lo, hi in zip(yi, means, los, his):
-            ax.errorbar(mn, yy,
-                        xerr=[[mn - lo], [hi - mn]],
-                        fmt="o", color=DOT_COLOR,
-                        ms=DOT_MS, markeredgewidth=0,
-                        zorder=4, **EKW)
+    ax.set_xlabel("AUROC gap (source − target)",  labelpad=3)
+    ax.set_ylabel("ECE gap (ERM − Oracle)",       labelpad=3)
 
-    draw_dots(axA, gap_m, gap_lo, gap_hi)
-    draw_dots(axB, ece_m, ece_lo, ece_hi)
-
-    # ── reference lines ────────────────────────────────────────────────────
-    axA.axvline(0, color="#aaaaaa", lw=0.7, ls="--", zorder=1)
-
-    # ── axes formatting ────────────────────────────────────────────────────
-    for ax in (axA, axB):
-        ax.set_yticks(yi)
-        ax.set_ylim(-0.55, n - 0.45)
-        ax.tick_params(axis="y", left=False, pad=4)
-        ax.xaxis.grid(False)
-        ax.set_axisbelow(False)
-
-    axA.set_yticklabels(labels)
-    axB.set_yticklabels([])
-
-    axA.set_xlabel("AUROC gap (source−target)", labelpad=3)
-    axB.set_xlabel("Target ECE",                    labelpad=3)
-
-    # panel labels — top-left of each axes, small, bold
-    for ax, lbl in [(axA, "a"), (axB, "b")]:
-        ax.text(-0.02, 1.04, f"({lbl})", transform=ax.transAxes,
-                fontsize=9, fontweight="bold", va="bottom", ha="right",
-                color="#222")
-
-    # ── x-axis tick formatting ─────────────────────────────────────────────
-    # AUROC gap: symmetric around 0
-    axA.xaxis.set_major_formatter(
+    ax.xaxis.set_major_formatter(
         matplotlib.ticker.FuncFormatter(lambda x, _: f"{x:+.2f}" if x != 0 else "0"))
-    axA.xaxis.set_major_locator(matplotlib.ticker.MultipleLocator(0.05))
+    ax.yaxis.set_major_formatter(
+        matplotlib.ticker.FuncFormatter(lambda y, _: f"{y:+.2f}" if y != 0 else "0"))
 
-    axB.xaxis.set_major_locator(matplotlib.ticker.MultipleLocator(0.05))
-    axB.xaxis.set_major_formatter(
-        matplotlib.ticker.FuncFormatter(lambda x, _: f"{x:.2f}"))
-
-    # ── save ───────────────────────────────────────────────────────────────
     for ext in ("pdf", "png"):
         fig.savefig(os.path.join(OUT, f"fig1_divergence.{ext}"),
                     dpi=300, bbox_inches="tight")

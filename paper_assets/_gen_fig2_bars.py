@@ -1,9 +1,13 @@
 """
 Generate fig2_headroom (grouped vertical barplot, Nature style).
+Oracle shown as gray background bar (headroom ceiling).
+ERM and Best DA as vivid foreground bars with jittered seed dots.
+Significance stars: paired t-test (ERM vs Best DA) per scenario.
 Run from repo root:  python paper_assets/_gen_fig2_bars.py
 """
-import csv, os, glob
+import csv, os
 import numpy as np
+from scipy import stats as scipy_stats
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -23,9 +27,10 @@ SCENARIOS = [
 ]
 DA_METHODS = ("coral", "dann", "cdan")
 
-C_ERM    = "#566573"
-C_DA     = "#2471A3"
-C_ORACLE = "#1a1a2e"
+C_ERM    = "#2E86C1"   # vivid sky-blue
+C_DA     = "#E74C3C"   # vivid tomato-red
+C_ORACLE = "#D5D8DC"   # light silver-gray (background)
+C_ORACLE_EDGE = "#AAB7B8"
 
 plt.rcParams.update({
     "font.family":        "serif",
@@ -56,7 +61,6 @@ def load_summary(path):
 
 
 def load_raw(path):
-    """Returns {(scenario, method): [tgt_auroc per seed]}."""
     d = {}
     with open(path) as f:
         for r in csv.DictReader(f):
@@ -92,84 +96,110 @@ def best_da_method(A, sc):
     return max(cands)[1] if cands else None
 
 
+def pvalue_stars(p):
+    if p <= 0.001: return "***"
+    if p <= 0.01:  return "**"
+    if p <= 0.05:  return "*"
+    return "ns"
+
+
 def make(A, R):
     keys   = [k for k, _ in SCENARIOS]
     labels = [l for _, l in SCENARIOS]
     n      = len(keys)
-    x      = np.arange(n)
+    x      = np.arange(n, dtype=float)
 
-    W  = 0.24   # bar width
-    rng = np.random.default_rng(0)
+    W_bg = 0.54    # oracle background bar width
+    W_fg = 0.20    # ERM / DA foreground bar width
+    sep  = 0.025   # gap between ERM and DA bars
+    rng  = np.random.default_rng(42)
 
-    fig, ax = plt.subplots(figsize=(5.4, 2.8))
-    fig.subplots_adjust(left=0.10, right=0.98, top=0.97, bottom=0.15)
+    Y_MIN = 0.50
+    Y_MAX = 0.91
+
+    fig, ax = plt.subplots(figsize=(5.8, 3.0))
+    fig.subplots_adjust(left=0.11, right=0.98, top=0.91, bottom=0.14)
 
     for i, (sc, _) in enumerate(SCENARIOS):
-        erm_m, erm_lo, erm_hi     = get(A, sc, "all_observed",     "tgt_auroc")
-        da_m,  da_lo,  da_hi      = best_da(A, sc)
-        orc_m, orc_lo, orc_hi     = get(A, sc, "invariant_oracle", "tgt_auroc")
+        erm_m, erm_lo, erm_hi = get(A, sc, "all_observed",     "tgt_auroc")
+        da_m,  da_lo,  da_hi  = best_da(A, sc)
+        orc_m, orc_lo, orc_hi = get(A, sc, "invariant_oracle", "tgt_auroc")
         da_key = best_da_method(A, sc)
 
-        xi = x[i]
+        xi    = x[i]
+        x_erm = xi - (W_fg / 2 + sep / 2)
+        x_da  = xi + (W_fg / 2 + sep / 2)
 
-        # ── ERM bar ──────────────────────────────────────────────────────
-        ax.bar(xi - W, erm_m, W, color=C_ERM,
-               linewidth=0, zorder=2)
-        ax.errorbar(xi - W, erm_m,
+        # ── Oracle background bar (gray, behind everything) ───────────────
+        ax.bar(xi, orc_m - Y_MIN, W_bg, bottom=Y_MIN,
+               color=C_ORACLE, edgecolor=C_ORACLE_EDGE,
+               linewidth=0.4, zorder=1)
+
+        # ── ERM bar ───────────────────────────────────────────────────────
+        ax.bar(x_erm, erm_m - Y_MIN, W_fg, bottom=Y_MIN,
+               color=C_ERM, linewidth=0, zorder=3)
+        ax.errorbar(x_erm, erm_m,
                     yerr=[[erm_m - erm_lo], [erm_hi - erm_m]],
-                    fmt="none", color="white", elinewidth=0.9,
-                    capsize=2.5, capthick=0.9, zorder=4)
+                    fmt="none", color="black", elinewidth=1.1,
+                    capsize=2.8, capthick=1.0, zorder=5)
 
         # ── Best DA bar ───────────────────────────────────────────────────
-        ax.bar(xi, da_m, W, color=C_DA,
-               linewidth=0, zorder=2)
-        ax.errorbar(xi, da_m,
+        ax.bar(x_da, da_m - Y_MIN, W_fg, bottom=Y_MIN,
+               color=C_DA, linewidth=0, zorder=3)
+        ax.errorbar(x_da, da_m,
                     yerr=[[da_m - da_lo], [da_hi - da_m]],
-                    fmt="none", color="white", elinewidth=0.9,
-                    capsize=2.5, capthick=0.9, zorder=4)
+                    fmt="none", color="black", elinewidth=1.1,
+                    capsize=2.8, capthick=1.0, zorder=5)
 
-        # ── Oracle bar (outline/hatch only) ──────────────────────────────
-        ax.bar(xi + W, orc_m, W,
-               color="none", edgecolor=C_ORACLE,
-               linewidth=1.0, hatch="///", zorder=2)
-        ax.errorbar(xi + W, orc_m,
-                    yerr=[[orc_m - orc_lo], [orc_hi - orc_m]],
-                    fmt="none", color=C_ORACLE, elinewidth=0.9,
-                    capsize=2.5, capthick=0.9, zorder=4)
-
-        # ── jittered seed dots (ERM and best DA) ─────────────────────────
+        # ── jittered seed dots ─────────────────────────────────────────────
         for jx, key, col in [
-            (xi - W, (sc, "all_observed"), C_ERM),
-            (xi,     (sc, da_key),         C_DA),
+            (x_erm, (sc, "all_observed"), C_ERM),
+            (x_da,  (sc, da_key),         C_DA),
         ]:
             seeds = R.get(key, [])
             if seeds:
-                jitter = rng.uniform(-0.06, 0.06, len(seeds))
+                jitter = rng.uniform(-W_fg * 0.4, W_fg * 0.4, len(seeds))
+                # darken the base color slightly for dots
                 ax.scatter(jx + jitter, seeds,
-                           s=4, color=col, alpha=0.55,
-                           linewidths=0, zorder=3)
+                           s=7, color="white", alpha=0.65,
+                           linewidths=0.3, edgecolors=col, zorder=4)
+
+        # ── significance bracket + stars (ERM vs Best DA) ─────────────────
+        erm_seeds = R.get((sc, "all_observed"), [])
+        da_seeds  = R.get((sc, da_key), []) if da_key else []
+        if len(erm_seeds) >= 2 and len(da_seeds) >= 2:
+            _, p = scipy_stats.ttest_rel(erm_seeds, da_seeds)
+            # Bonferroni: best DA is selected post-hoc among len(DA_METHODS)
+            # candidates, so correct the per-test p for that multiplicity.
+            p = min(1.0, p * len(DA_METHODS))
+            stars = pvalue_stars(p)
+            top = max(erm_hi, da_hi) + 0.008
+            # draw bracket line
+            ax.plot([x_erm, x_erm, x_da, x_da],
+                    [top, top + 0.003, top + 0.003, top],
+                    color="#555555", linewidth=0.7, zorder=6)
+            ax.text(xi, top + 0.003, stars, ha="center", va="bottom",
+                    fontsize=7.5, color="#333333", zorder=6)
 
     # ── axes ──────────────────────────────────────────────────────────────
     ax.set_xticks(x)
     ax.set_xticklabels(labels, linespacing=0.9)
     ax.set_ylabel("Target AUROC", labelpad=4)
-    ax.set_ylim(0.50, 0.92)
-    ax.axhline(0.5, color="#aaaaaa", lw=0.7, ls=":", zorder=0)
+    ax.set_ylim(Y_MIN, Y_MAX)
     ax.yaxis.set_major_locator(ticker.MultipleLocator(0.05))
-    ax.yaxis.grid(True, color="#eeeeee", linewidth=0.5, zorder=0)
+    ax.yaxis.grid(True, color="#e8e8e8", linewidth=0.5, zorder=0)
     ax.set_axisbelow(True)
 
     # ── legend ────────────────────────────────────────────────────────────
     leg = [
-        plt.Rectangle((0, 0), 1, 1, fc=C_ERM,  ec="none",     label="ERM"),
-        plt.Rectangle((0, 0), 1, 1, fc=C_DA,   ec="none",     label="Best DA"),
-        plt.Rectangle((0, 0), 1, 1, fc="none", ec=C_ORACLE,
-                       linewidth=1.0, hatch="///",             label="Oracle (headroom)"),
+        plt.Rectangle((0, 0), 1, 1, fc=C_ERM,    ec="none",           label="ERM"),
+        plt.Rectangle((0, 0), 1, 1, fc=C_DA,     ec="none",           label="Best DA"),
+        plt.Rectangle((0, 0), 1, 1, fc=C_ORACLE, ec=C_ORACLE_EDGE,
+                       linewidth=0.5,                                   label="Oracle (headroom)"),
     ]
-    ax.legend(handles=leg, loc="lower left", frameon=False,
-              ncol=3, fontsize=7.5, handlelength=1.0, handleheight=0.9,
-              columnspacing=0.8, handletextpad=0.4, borderpad=0,
-              bbox_to_anchor=(0.0, -0.02))
+    ax.legend(handles=leg, loc="upper right", frameon=False,
+              ncol=1, fontsize=7.5, handlelength=1.0, handleheight=0.85,
+              columnspacing=0.7, handletextpad=0.45, borderpad=0)
 
     for ext in ("pdf", "png"):
         fig.savefig(os.path.join(OUT, f"fig2_headroom.{ext}"),

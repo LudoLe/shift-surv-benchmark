@@ -102,7 +102,9 @@ def best_gap(rows, kind):
             return np.nan, 0.0, 0.0, ""
         m = max(cand, key=cand.get)
         r = rows[m]
-        return r["auroc_gap"], r["auroc_gap_lo"], r["auroc_gap_hi"], _star(r["auroc_gap_p"])
+        # Bonferroni: best DA selected post-hoc among len(DA_METHODS) candidates.
+        p = min(1.0, r["auroc_gap_p"] * len(DA_METHODS))
+        return r["auroc_gap"], r["auroc_gap_lo"], r["auroc_gap_hi"], _star(p)
     else:
         cand = {m: rows[m]["ece_gap"] for m in DA_METHODS
                 if m in rows and not np.isnan(rows[m]["ece_gap"])}
@@ -110,7 +112,9 @@ def best_gap(rows, kind):
             return np.nan, 0.0, 0.0, ""
         m = max(cand, key=cand.get)   # largest improvement (erm - method)
         r = rows[m]
-        return r["ece_gap"], r["ece_gap_lo"], r["ece_gap_hi"], _star(r["ece_gap_p"])
+        # Bonferroni: best DA selected post-hoc among len(DA_METHODS) candidates.
+        p = min(1.0, r["ece_gap_p"] * len(DA_METHODS))
+        return r["ece_gap"], r["ece_gap_lo"], r["ece_gap_hi"], _star(p)
 
 
 def make():
