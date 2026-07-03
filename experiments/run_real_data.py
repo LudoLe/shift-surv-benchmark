@@ -41,6 +41,7 @@ from sklearn.preprocessing import StandardScaler
 
 from utils.metrics import auroc, auprc, ece, f1, sensitivity, specificity, prevalence
 from utils.io import save_table_csv
+from utils.shift_diag import rbf_mmd, rbf_mmd_permutation
 
 import matplotlib
 matplotlib.use("Agg")
@@ -81,6 +82,80 @@ def load_i3lung(
     return src, tgt, cb_feats
 
 
+# Public multicentric registries selectable from the CLI.
+_PUBLIC_REGISTRIES = {
+    "rotterdam_gbsg": "data.registry_rotterdam_gbsg",
+}
+
+
+def _center_to_df(
+    center: dict,
+    feature_names: list[str],
+    tau: float,
+    label_col: str,
+) -> pd.DataFrame:
+    """Binarise one survival centre to a fixed-horizon label at ``tau`` months.
+
+    Mirrors the I3LUNG ``OS_6`` protocol:
+      y=1  if event observed before tau        (t < tau and delta == 1)
+      y=0  if event-free through tau            (t >= tau)
+      drop if censored before tau               (t < tau and delta == 0)
+    Rows censored before the horizon have an unknown label and are dropped,
+    exactly as ``load_i3lung`` drops rows with missing OS_6.
+    """
+    t = np.asarray(center["t"], dtype=float)
+    d = np.asarray(center["delta"], dtype=int)
+    y = np.where(t < tau, d, 0).astype(int)          # event-before-tau else 0
+    keep = ~((t < tau) & (d == 0))                    # drop censored-before-tau
+    df = pd.DataFrame(center["X"][keep], columns=feature_names)
+    df[label_col] = y[keep]
+    return df.reset_index(drop=True)
+
+
+def load_public_transfer(
+    registry_name: str,
+    source_center: str,
+    target_center: str,
+    tau: float,
+    label_col: str = "event",
+) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
+    """Load a public multicentric survival registry and build a source→target
+    fixed-horizon binary transfer, matching the (src_df, tgt_df, features) shape
+    consumed by ``_run_seed``.
+
+    ``source_center``/``target_center`` may be centre names (values of the
+    registry's ``CENTER_NAMES``) or integer center ids.
+    """
+    import importlib
+
+    if registry_name not in _PUBLIC_REGISTRIES:
+        raise ValueError(
+            f"Unknown registry '{registry_name}'. Available: {list(_PUBLIC_REGISTRIES)}"
+        )
+    reg = importlib.import_module(_PUBLIC_REGISTRIES[registry_name])
+    centers, feature_names = reg.load_all_centers()
+
+    name_to_id = {v: k for k, v in reg.CENTER_NAMES.items()}
+
+    def _resolve(sel: str) -> int:
+        if sel in name_to_id:
+            return name_to_id[sel]
+        try:
+            return int(sel)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"Center '{sel}' not found. Available: {list(reg.CENTER_NAMES.values())}"
+            )
+
+    by_id = {c["center_id"]: c for c in centers}
+    src_c = by_id[_resolve(source_center)]
+    tgt_c = by_id[_resolve(target_center)]
+
+    src_df = _center_to_df(src_c, feature_names, tau, label_col)
+    tgt_df = _center_to_df(tgt_c, feature_names, tau, label_col)
+    return src_df, tgt_df, feature_names
+
+
 # ---------------------------------------------------------------------------
 # Score helper
 # ---------------------------------------------------------------------------
@@ -108,6 +183,7 @@ def _run_seed(
     feature_cols: list[str],
     seed: int,
     use_iwcv: bool = True,
+    label_col: str = "OS_6",
 ) -> tuple[list[dict], np.ndarray]:
     """Fit all methods for one seed.
 
@@ -119,9 +195,9 @@ def _run_seed(
     from experiments.baselines import fit_prior_recalib
 
     X_src = src[feature_cols].values
-    y_src = src["OS_6"].values.astype(int)
+    y_src = src[label_col].values.astype(int)
     X_tgt = tgt[feature_cols].values
-    y_tgt = tgt["OS_6"].values.astype(int)
+    y_tgt = tgt[label_col].values.astype(int)
 
     # 80/20 stratified split on source
     X_tr, X_val, y_tr, y_val = train_test_split(
@@ -483,28 +559,69 @@ def _print_real_results(agg: list[dict], n_seeds: int, source: str, target: str)
 
 
 # ---------------------------------------------------------------------------
+# Covariate-shift diagnostic
+# ---------------------------------------------------------------------------
+
+def _shift_diagnostic(
+    src_df: pd.DataFrame,
+    tgt_df: pd.DataFrame,
+    feature_cols: list[str],
+    label_col: str,
+    source_center: str,
+    target_center: str,
+    tau: float | None = None,
+) -> list[dict]:
+    """RBF-MMD between source/target features (median-imputed + source-fit
+    standardised) with a permutation p-value, plus the label-prevalence gap —
+    one row, saved to *_shiftdiag.csv."""
+    Xs = src_df[feature_cols].values.astype(float)
+    Xt = tgt_df[feature_cols].values.astype(float)
+
+    imputer = SimpleImputer(strategy="median").fit(Xs)
+    scaler  = StandardScaler().fit(imputer.transform(Xs))
+    Xs_s = scaler.transform(imputer.transform(Xs))
+    Xt_s = scaler.transform(imputer.transform(Xt))
+
+    mmd, mmd_p = rbf_mmd_permutation(Xs_s, Xt_s, n_perm=1000, seed=0)
+    prev_gap = abs(float(src_df[label_col].mean()) - float(tgt_df[label_col].mean()))
+    return [{
+        "source":          source_center,
+        "target":          target_center,
+        "tau":             tau if tau is not None else "",
+        "rbf_mmd":         round(mmd, 4),
+        "rbf_mmd_p":       round(mmd_p, 4),
+        "prevalence_gap":  round(prev_gap, 4),
+        "n_src":           int(len(src_df)),
+        "n_tgt":           int(len(tgt_df)),
+        "n_features":      len(feature_cols),
+    }]
+
+
+# ---------------------------------------------------------------------------
 # Main runner
 # ---------------------------------------------------------------------------
 
-def run_real_data(
-    data_dir: str | Path,
-    source_center: str = "INT",
-    target_center: str = "GHD",
-    seeds: list[int] | None = None,
-    use_iwcv: bool = True,
-    out_prefix: str = "i3lung_cb",
-    verbose: bool = True,
+def _run_transfer(
+    src_df: pd.DataFrame,
+    tgt_df: pd.DataFrame,
+    feature_cols: list[str],
+    label_col: str,
+    source_center: str,
+    target_center: str,
+    seeds: list[int],
+    use_iwcv: bool,
+    out_prefix: str,
+    banner: str,
+    verbose: bool,
+    tau: float | None = None,
 ) -> dict:
-    if seeds is None:
-        seeds = list(range(10))
-
-    src_df, tgt_df, feature_cols = load_i3lung(data_dir, source_center, target_center)
-
+    """Dataset-agnostic core: run all methods over seeds, aggregate, bootstrap,
+    save tables. Shared by the I3LUNG and public-registry entry points."""
     if verbose:
-        print(f"\nI3LUNG real data: {source_center} (n={len(src_df)}) → {target_center} (n={len(tgt_df)})")
+        print(f"\n{banner}: {source_center} (n={len(src_df)}) → {target_center} (n={len(tgt_df)})")
         print(f"Features ({len(feature_cols)}): {feature_cols}")
-        print(f"OS_6 prevalence — {source_center}: {src_df['OS_6'].mean():.3f}  "
-              f"{target_center}: {tgt_df['OS_6'].mean():.3f}")
+        print(f"{label_col} prevalence — {source_center}: {src_df[label_col].mean():.3f}  "
+              f"{target_center}: {tgt_df[label_col].mean():.3f}")
 
     all_rows: list[dict] = []
     prob_accum: dict[str, list[np.ndarray]] = {}
@@ -512,7 +629,9 @@ def run_real_data(
     for seed in seeds:
         if verbose:
             print(f"  [Seed {seed}]", flush=True)
-        results, y_tgt = _run_seed(src_df, tgt_df, feature_cols, seed=seed, use_iwcv=use_iwcv)
+        results, y_tgt = _run_seed(
+            src_df, tgt_df, feature_cols, seed=seed, use_iwcv=use_iwcv, label_col=label_col,
+        )
         y_tgt_ref = y_tgt
         for r in results:
             all_rows.append(_flatten_real(r, seed))
@@ -529,21 +648,82 @@ def run_real_data(
         prob_by_method = {m: np.vstack(P) for m, P in prob_accum.items() if P}
         boot_rows = _bootstrap_real_gaps(prob_by_method, y_tgt_ref, reference="lr_erm")
 
+    # Covariate-shift diagnostic: how far apart are source/target features?
+    diag_rows = _shift_diagnostic(src_df, tgt_df, feature_cols, label_col,
+                                  source_center, target_center, tau=tau)
+
     _TABLES.mkdir(parents=True, exist_ok=True)
     save_table_csv(all_rows, _TABLES / f"{out_prefix}_raw.csv")
     save_table_csv(agg,      _TABLES / f"{out_prefix}_summary.csv")
     if boot_rows:
         save_table_csv(boot_rows, _TABLES / f"{out_prefix}_bootstrap.csv")
+    if diag_rows:
+        save_table_csv(diag_rows, _TABLES / f"{out_prefix}_shiftdiag.csv")
 
     if verbose:
         _print_real_results(agg, len(seeds), source_center, target_center)
         _print_bootstrap(boot_rows, source_center, target_center)
+        if diag_rows:
+            d = diag_rows[0]
+            print(f"\n  COVARIATE SHIFT DIAGNOSTIC — {source_center} → {target_center}")
+            print(f"    RBF-MMD (standardised features): {d['rbf_mmd']:.4f}  (perm p={d['rbf_mmd_p']:.4f})")
+            print(f"    label prevalence gap: {d['prevalence_gap']:.4f}")
         print(f"\n  Saved: {_TABLES}/{out_prefix}_raw.csv")
         print(f"  Saved: {_TABLES}/{out_prefix}_summary.csv")
         if boot_rows:
             print(f"  Saved: {_TABLES}/{out_prefix}_bootstrap.csv")
+        if diag_rows:
+            print(f"  Saved: {_TABLES}/{out_prefix}_shiftdiag.csv")
 
-    return {"raw": all_rows, "aggregated": agg, "bootstrap": boot_rows}
+    return {"raw": all_rows, "aggregated": agg, "bootstrap": boot_rows, "shiftdiag": diag_rows}
+
+
+def run_real_data(
+    data_dir: str | Path,
+    source_center: str = "INT",
+    target_center: str = "GHD",
+    seeds: list[int] | None = None,
+    use_iwcv: bool = True,
+    out_prefix: str = "i3lung_cb",
+    verbose: bool = True,
+) -> dict:
+    if seeds is None:
+        seeds = list(range(10))
+    src_df, tgt_df, feature_cols = load_i3lung(data_dir, source_center, target_center)
+    return _run_transfer(
+        src_df, tgt_df, feature_cols, label_col="OS_6",
+        source_center=source_center, target_center=target_center,
+        seeds=seeds, use_iwcv=use_iwcv, out_prefix=out_prefix,
+        banner="I3LUNG real data", verbose=verbose,
+    )
+
+
+def run_public_data(
+    registry_name: str,
+    source_center: str,
+    target_center: str,
+    tau: float,
+    seeds: list[int] | None = None,
+    use_iwcv: bool = True,
+    out_prefix: str | None = None,
+    verbose: bool = True,
+) -> dict:
+    """Same protocol as ``run_real_data`` on a public multicentric survival
+    registry, with the outcome binarised at a fixed horizon ``tau`` (months)."""
+    if seeds is None:
+        seeds = list(range(10))
+    if out_prefix is None:
+        out_prefix = f"public_{registry_name}_{source_center}_{target_center}"
+    src_df, tgt_df, feature_cols = load_public_transfer(
+        registry_name, source_center, target_center, tau,
+    )
+    return _run_transfer(
+        src_df, tgt_df, feature_cols, label_col="event",
+        source_center=source_center, target_center=target_center,
+        seeds=seeds, use_iwcv=use_iwcv, out_prefix=out_prefix,
+        banner=f"Public data [{registry_name}, tau={tau:g}m]", verbose=verbose,
+        tau=tau,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -552,28 +732,53 @@ def run_real_data(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="SHIFT-SURV real data experiment — I3LUNG CB features, INT→GHD",
+        description="SHIFT-SURV real-data experiment — I3LUNG or public multicentric registry",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--data_dir", type=str, required=True,
-                        help="Path to I3LUNG_DATA directory.")
-    parser.add_argument("--source", type=str, default="INT",
-                        help="Source center name.")
-    parser.add_argument("--target", type=str, default="GHD",
-                        help="Target center name.")
+    parser.add_argument("--dataset", type=str, default="i3lung",
+                        choices=["i3lung"] + list(_PUBLIC_REGISTRIES),
+                        help="i3lung (private CSVs, needs --data_dir) or a public registry.")
+    parser.add_argument("--data_dir", type=str, default=None,
+                        help="Path to I3LUNG_DATA directory (required for --dataset i3lung).")
+    parser.add_argument("--source", type=str, default=None,
+                        help="Source center name (default: INT for i3lung, Rotterdam for public).")
+    parser.add_argument("--target", type=str, default=None,
+                        help="Target center name (default: GHD for i3lung, GBSG2 for public).")
+    parser.add_argument("--tau", type=float, default=None,
+                        help="Fixed horizon in months for public survival binarisation "
+                             "(default: the registry's TAU).")
     parser.add_argument("--n_seeds", type=int, default=10)
     parser.add_argument("--seed_start", type=int, default=0)
-    parser.add_argument("--out_prefix", type=str, default="i3lung_cb")
+    parser.add_argument("--out_prefix", type=str, default=None)
     parser.add_argument("--no_iwcv", dest="use_iwcv", action="store_false", default=True)
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
-    run_real_data(
-        data_dir=args.data_dir,
-        source_center=args.source,
-        target_center=args.target,
-        seeds=list(range(args.seed_start, args.seed_start + args.n_seeds)),
-        use_iwcv=args.use_iwcv,
-        out_prefix=args.out_prefix,
-        verbose=not args.quiet,
-    )
+    seeds = list(range(args.seed_start, args.seed_start + args.n_seeds))
+
+    if args.dataset == "i3lung":
+        if not args.data_dir:
+            parser.error("--data_dir is required for --dataset i3lung")
+        run_real_data(
+            data_dir=args.data_dir,
+            source_center=args.source or "INT",
+            target_center=args.target or "GHD",
+            seeds=seeds,
+            use_iwcv=args.use_iwcv,
+            out_prefix=args.out_prefix or "i3lung_cb",
+            verbose=not args.quiet,
+        )
+    else:
+        import importlib
+        reg = importlib.import_module(_PUBLIC_REGISTRIES[args.dataset])
+        tau = args.tau if args.tau is not None else float(reg.TAU)
+        run_public_data(
+            registry_name=args.dataset,
+            source_center=args.source or "Rotterdam",
+            target_center=args.target or "GBSG2",
+            tau=tau,
+            seeds=seeds,
+            use_iwcv=args.use_iwcv,
+            out_prefix=args.out_prefix,
+            verbose=not args.quiet,
+        )
