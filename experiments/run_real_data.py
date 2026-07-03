@@ -85,6 +85,7 @@ def load_i3lung(
 # Public multicentric registries selectable from the CLI.
 _PUBLIC_REGISTRIES = {
     "rotterdam_gbsg": "data.registry_rotterdam_gbsg",
+    "seer":           "data.registry_seer",
 }
 
 
@@ -751,12 +752,16 @@ if __name__ == "__main__":
     parser.add_argument("--seed_start", type=int, default=0)
     parser.add_argument("--out_prefix", type=str, default=None)
     parser.add_argument("--no_iwcv", dest="use_iwcv", action="store_false", default=True)
+    parser.add_argument("--list_centers", action="store_true",
+                        help="For a public registry: print the available centers (name, n) and exit.")
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
     seeds = list(range(args.seed_start, args.seed_start + args.n_seeds))
 
     if args.dataset == "i3lung":
+        if args.list_centers:
+            parser.error("--list_centers is only for public registries")
         if not args.data_dir:
             parser.error("--data_dir is required for --dataset i3lung")
         run_real_data(
@@ -771,11 +776,29 @@ if __name__ == "__main__":
     else:
         import importlib
         reg = importlib.import_module(_PUBLIC_REGISTRIES[args.dataset])
+
+        if args.list_centers:
+            centers, feats = reg.load_all_centers()
+            print(f"\n{args.dataset}: {len(centers)} centers  (features: {feats})")
+            for c in sorted(centers, key=lambda c: -c["n"]):
+                print(f"  center_id={c['center_id']:<3d} n={c['n']:<7d} {reg.CENTER_NAMES[c['center_id']]}")
+            sys.exit(0)
+
+        # rotterdam_gbsg has sensible defaults; other registries need explicit pairs.
+        default_src = "Rotterdam" if args.dataset == "rotterdam_gbsg" else None
+        default_tgt = "GBSG2"     if args.dataset == "rotterdam_gbsg" else None
+        source = args.source or default_src
+        target = args.target or default_tgt
+        if source is None or target is None:
+            parser.error(
+                f"--source and --target are required for --dataset {args.dataset}. "
+                f"Run with --list_centers first to see the available center names."
+            )
         tau = args.tau if args.tau is not None else float(reg.TAU)
         run_public_data(
             registry_name=args.dataset,
-            source_center=args.source or "Rotterdam",
-            target_center=args.target or "GBSG2",
+            source_center=source,
+            target_center=target,
             tau=tau,
             seeds=seeds,
             use_iwcv=args.use_iwcv,
