@@ -82,6 +82,46 @@ def load_i3lung(
     return src, tgt, cb_feats
 
 
+class _CenterDataset:
+    """Minimal DomainDataset-compatible holder (x, y, domain_id, n) so the
+    synthetic-benchmark method functions (fit_all_observed, fit_coral, fit_irm,
+    fit_group_dro, ...) can be reused verbatim on real per-center cohorts."""
+
+    def __init__(self, x, y, domain_id):
+        self.x = np.asarray(x, dtype=float)
+        self.y = np.asarray(y).astype(float)
+        self.domain_id = domain_id
+        self.n = len(self.y)
+        # A few method paths reference latent factors; on real data we alias x.
+        self.u_inv = self.x
+        self.u_spu = self.x[:, :2] if self.x.shape[1] >= 2 else self.x
+
+
+def load_i3lung_all(
+    data_dir: str | Path,
+    min_n: int = 50,
+) -> tuple[dict, list[str]]:
+    """Load every I3LUNG center as a {center: (X_df, y)} dict for the
+    leave-one-center-out (LOCO) multi-source domain-generalization experiment.
+    Rows with missing OS_6 are dropped; centers with < min_n patients are
+    skipped (too small to be a useful source or held-out target)."""
+    data_dir = Path(data_dir)
+    cb       = pd.read_csv(data_dir / "cb.csv")
+    outcomes = pd.read_csv(data_dir / "outcomes.csv")
+    with open(data_dir / "features.json") as f:
+        cb_feats = json.load(f)["CB"]
+    df = cb.merge(outcomes[["Subject", "OS_6"]], on="Subject").dropna(subset=["OS_6"])
+    centers: dict = {}
+    for c in sorted(df["CENTER"].unique()):
+        sub = df[df["CENTER"] == c]
+        if len(sub) < min_n:
+            continue
+        X = sub[cb_feats].reset_index(drop=True)
+        y = sub["OS_6"].astype(int).reset_index(drop=True).values
+        centers[c] = (X, y)
+    return centers, cb_feats
+
+
 # Public multicentric registries selectable from the CLI.
 _PUBLIC_REGISTRIES = {
     "rotterdam_gbsg": "data.registry_rotterdam_gbsg",
@@ -358,7 +398,8 @@ def _run_seed(
 
 _METRIC_KEYS = ["src_auroc", "tgt_auroc", "tgt_ece", "tgt_f1",
                 "tgt_sensitivity", "tgt_specificity", "gap"]
-_METHODS     = ["lr_erm", "iw_erm", "prior_recalib", "platt_scaling", "coral", "dann", "cdan"]
+_METHODS     = ["lr_erm", "iw_erm", "prior_recalib", "platt_scaling", "coral",
+                "irm", "group_dro", "dann", "cdan"]
 
 
 def _flatten_real(r: dict, seed: int) -> dict:
@@ -728,6 +769,127 @@ def run_public_data(
 
 
 # ---------------------------------------------------------------------------
+# Leave-one-center-out multi-source domain generalization (I3LUNG)
+# ---------------------------------------------------------------------------
+
+def _run_loco_seed(
+    centers: dict,
+    feature_cols: list[str],
+    target_center: str,
+    seed: int,
+    use_iwcv: bool = True,
+) -> tuple[list[dict], np.ndarray]:
+    """One LOCO fold/seed: pool every non-target center as a labeled source
+    (each a DRO group / IRM environment), evaluate on the held-out target.
+
+    The median imputer is fitted on the pooled source features only (no target
+    leakage); each method function then does its own standardization internally.
+    Reuses the synthetic-benchmark method functions unchanged via _CenterDataset.
+    """
+    from experiments.baselines import fit_all_observed, fit_prior_recalib, fit_platt_scaling
+    from experiments.adaptation_methods import fit_iw_erm, fit_coral, fit_dann, fit_cdan, fit_irm
+    from experiments.group_dro import fit_group_dro
+
+    source_names = [c for c in centers if c != target_center]
+    X_pool = np.vstack([centers[c][0].values for c in source_names])
+    imputer = SimpleImputer(strategy="median").fit(X_pool)
+
+    src_ds = [_CenterDataset(imputer.transform(centers[c][0].values), centers[c][1], i)
+              for i, c in enumerate(source_names)]
+    X_tgt, y_tgt_raw = centers[target_center]
+    tgt_ds = _CenterDataset(imputer.transform(X_tgt.values), y_tgt_raw, domain_id=len(source_names))
+    y_tgt = tgt_ds.y.astype(int)
+
+    # ERM + target-using DA + multi-source DG (IRM, GroupDRO), all reusing the
+    # same per-center source list (DA methods pool it; DG methods group by it).
+    method_fns = [
+        ("lr_erm",        lambda: fit_all_observed(src_ds, tgt_ds)),
+        ("iw_erm",        lambda: fit_iw_erm(src_ds, tgt_ds, seed=seed)),
+        ("prior_recalib", lambda: fit_prior_recalib(src_ds, tgt_ds)),
+        ("platt_scaling", lambda: fit_platt_scaling(src_ds, tgt_ds)),
+        ("coral",         lambda: fit_coral(src_ds, tgt_ds, seed=seed)),
+        ("irm",           lambda: fit_irm(src_ds, tgt_ds, seed=seed)),
+        ("group_dro",     lambda: fit_group_dro(src_ds, tgt_ds, seed=seed)),
+        ("dann",          lambda: fit_dann(src_ds, tgt_ds, seed=seed, use_iwcv=use_iwcv)),
+        ("cdan",          lambda: fit_cdan(src_ds, tgt_ds, seed=seed, use_iwcv=use_iwcv)),
+    ]
+    results = []
+    for name, fn in method_fns:
+        try:
+            r = fn()
+            probs = r.get("target_probs")
+            results.append({
+                "method":        name,
+                "source_pooled": r.get("source_pooled", {}),
+                "target":        r.get("target", {}),
+                "tgt_probs":     np.asarray(probs) if probs is not None else None,
+            })
+        except Exception as e:
+            warnings.warn(f"{name} failed (target={target_center}, seed={seed}): {e}")
+            results.append({"method": name, "source_pooled": {}, "target": {}, "tgt_probs": None})
+    return results, y_tgt
+
+
+def run_i3lung_loco(
+    data_dir: str | Path,
+    seeds: list[int] | None = None,
+    use_iwcv: bool = True,
+    out_prefix: str = "i3lung_loco",
+    verbose: bool = True,
+) -> None:
+    """Leave-one-center-out multi-source domain generalization on I3LUNG.
+
+    For each held-out target center the remaining centers are pooled as labeled
+    sources (each a DRO group / IRM environment).  Runs ERM, the target-using DA
+    methods, and the multi-source DG methods (IRM, GroupDRO), with a patient-
+    level bootstrap vs ERM per fold.  Writes <out_prefix>_<TARGET>_bootstrap.csv,
+    which experiments.meta_analysis --prefix i3lung_loco then pools across folds.
+    """
+    if seeds is None:
+        seeds = list(range(10))
+    centers, feature_cols = load_i3lung_all(data_dir)
+    names = list(centers.keys())
+    if verbose:
+        print(f"\nI3LUNG LOCO — {len(names)} centers: "
+              + ", ".join(f"{c}(n={len(centers[c][1])})" for c in names))
+
+    for target in names:
+        all_rows: list[dict] = []
+        prob_accum: dict[str, list[np.ndarray]] = {}
+        y_ref: np.ndarray | None = None
+        if verbose:
+            print(f"\n=== target = {target}  (sources = {[c for c in names if c != target]}) ===")
+        for seed in seeds:
+            if verbose:
+                print(f"  [seed {seed}]", flush=True)
+            results, y_tgt = _run_loco_seed(centers, feature_cols, target, seed, use_iwcv)
+            y_ref = y_tgt
+            for r in results:
+                all_rows.append(_flatten_real(r, seed))
+                probs = r.get("tgt_probs")
+                if probs is not None and np.asarray(probs).size == len(y_tgt):
+                    prob_accum.setdefault(r["method"], []).append(np.asarray(probs))
+
+        agg = _aggregate_real(all_rows)
+        boot: list[dict] = []
+        if y_ref is not None:
+            boot = _bootstrap_real_gaps(
+                {m: np.vstack(P) for m, P in prob_accum.items() if P},
+                y_ref, reference="lr_erm")
+
+        _TABLES.mkdir(parents=True, exist_ok=True)
+        pfx = f"{out_prefix}_{target}"
+        save_table_csv(all_rows, _TABLES / f"{pfx}_raw.csv")
+        save_table_csv(agg,      _TABLES / f"{pfx}_summary.csv")
+        if boot:
+            save_table_csv(boot, _TABLES / f"{pfx}_bootstrap.csv")
+        if verbose:
+            _print_real_results(agg, len(seeds), f"{len(names)-1}-source pool", target)
+            _print_bootstrap(boot, "pooled-sources", target)
+            print(f"  Saved: {_TABLES}/{pfx}_{{raw,summary,bootstrap}}.csv")
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -752,6 +914,9 @@ if __name__ == "__main__":
     parser.add_argument("--seed_start", type=int, default=0)
     parser.add_argument("--out_prefix", type=str, default=None)
     parser.add_argument("--no_iwcv", dest="use_iwcv", action="store_false", default=True)
+    parser.add_argument("--loco", action="store_true",
+                        help="I3LUNG leave-one-center-out multi-source domain generalization "
+                             "(adds IRM + GroupDRO; ignores --source/--target).")
     parser.add_argument("--list_centers", action="store_true",
                         help="For a public registry: print the available centers (name, n) and exit.")
     parser.add_argument("--quiet", action="store_true")
@@ -764,15 +929,24 @@ if __name__ == "__main__":
             parser.error("--list_centers is only for public registries")
         if not args.data_dir:
             parser.error("--data_dir is required for --dataset i3lung")
-        run_real_data(
-            data_dir=args.data_dir,
-            source_center=args.source or "INT",
-            target_center=args.target or "GHD",
-            seeds=seeds,
-            use_iwcv=args.use_iwcv,
-            out_prefix=args.out_prefix or "i3lung_cb",
-            verbose=not args.quiet,
-        )
+        if args.loco:
+            run_i3lung_loco(
+                data_dir=args.data_dir,
+                seeds=seeds,
+                use_iwcv=args.use_iwcv,
+                out_prefix=args.out_prefix or "i3lung_loco",
+                verbose=not args.quiet,
+            )
+        else:
+            run_real_data(
+                data_dir=args.data_dir,
+                source_center=args.source or "INT",
+                target_center=args.target or "GHD",
+                seeds=seeds,
+                use_iwcv=args.use_iwcv,
+                out_prefix=args.out_prefix or "i3lung_cb",
+                verbose=not args.quiet,
+            )
     else:
         import importlib
         reg = importlib.import_module(_PUBLIC_REGISTRIES[args.dataset])

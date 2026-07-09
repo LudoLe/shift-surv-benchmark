@@ -10,7 +10,7 @@ Methods
   all_observed  — Pooled ERM LR on observed x (source-only baseline)
   iw_erm        — Importance-weighted ERM (covariate-shift correction)
   coral         — CORAL with LR estimator
-  irm           — Invariant Risk Minimization (IRMv1, linear)
+  irm           — Invariant Risk Minimization (IRMv1, linear; only with >=2 sources)
   prior_recalib — Saerens EM prior-shift recalibration
   platt_scaling — Platt (sigmoid) post-hoc calibration on source val
   isotonic      — Isotonic post-hoc calibration on source val
@@ -141,7 +141,6 @@ def _run_one(
         fit_all_observed(src, tgt),
         fit_iw_erm(src, tgt, seed=seed),
         fit_coral(src, tgt, seed=seed),
-        fit_irm(src, tgt, seed=seed),
         fit_prior_recalib(src, tgt),
         fit_platt_scaling(src, tgt),
         fit_isotonic(src, tgt),
@@ -159,9 +158,12 @@ def _run_one(
         ),
     ]
 
-    # GroupDRO is a multi-source domain-generalization method: it only differs
-    # from ERM when there are >=2 source centers to be robust across.
+    # IRM and GroupDRO are multi-source domain-generalization methods: their
+    # objectives (IRMv1 cross-environment penalty; GroupDRO worst-group risk)
+    # are only meaningful with >=2 source centers. With one source both reduce
+    # to ERM, so they are computed only in the multi-source regime.
     if len(src) >= 2:
+        results.append(fit_irm(src, tgt, seed=seed))
         results.append(fit_group_dro(src, tgt, seed=seed))
 
     flat_rows = [_flatten(r, scenario, seed) for r in results]
@@ -599,13 +601,13 @@ def run_adaptation(
         seeds = list(range(10))
 
     methods = [
-        "invariant_oracle", "all_observed", "iw_erm", "coral", "irm",
+        "invariant_oracle", "all_observed", "iw_erm", "coral",
         "prior_recalib", "platt_scaling", "isotonic", "dann", "cdan",
     ]
-    # GroupDRO (multi-source domain generalization) is only meaningful, and only
-    # produced by _run_one, when there are >=2 source centers.
+    # IRM and GroupDRO (multi-source domain generalization) are only meaningful,
+    # and only produced by _run_one, when there are >=2 source centers.
     if n_source_domains >= 2:
-        methods = methods + ["group_dro"]
+        methods = methods + ["irm", "group_dro"]
 
     all_rows:  list[dict] = []
     all_hp:    list[dict] = []
@@ -714,9 +716,10 @@ def run_n_sweep(
       - one aggregated plot: AUROC vs n, per method, per scenario
     """
     methods = [
-        "invariant_oracle", "all_observed", "iw_erm", "coral", "irm",
+        "invariant_oracle", "all_observed", "iw_erm", "coral",
         "prior_recalib", "platt_scaling", "isotonic", "dann", "cdan",
     ]
+    # n-sweep runs the 1-source regime, where IRM/GroupDRO reduce to ERM.
     sweep_agg: dict[int, list[dict]] = {}
 
     for n in n_values:

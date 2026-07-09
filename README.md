@@ -30,9 +30,14 @@ pip install -r requirements.txt
 # Main benchmark (7 core scenarios × 8 methods × 10 seeds)
 python -m experiments.run_adaptation
 
-# Multi-source benchmark with the GroupDRO domain-generalization baseline
-# (GroupDRO needs >=2 source centers; it degenerates to ERM with one source):
+# Multi-source benchmark with the IRM + GroupDRO domain-generalization baselines
+# (both need >=2 source centers; they degenerate to ERM with one source):
 python -m experiments.run_adaptation --n_source_domains 3 --out_prefix benchmark_3s1t
+
+# Real-data counterpart: leave-one-center-out multi-source DG on I3LUNG
+# (pools the other centers as sources; adds IRM + GroupDRO; feeds meta_analysis):
+python -m experiments.run_real_data --dataset i3lung --data_dir /path/to/I3LUNG_DATA --loco
+python -m experiments.meta_analysis --prefix i3lung_loco
 
 # Include appendix scenarios (strong_covariate_shift, cure_shift)
 python -m experiments.run_adaptation --include_appendix --out_prefix benchmark_1s1t_full
@@ -66,7 +71,7 @@ Outputs are written to `outputs/tables/<prefix>_raw/summary/compact/hp_sweep.csv
 | ERM LR | `lr_erm` | Pooled source logistic regression |
 | IW-ERM | `iw_erm` | Importance-weighted ERM (covariate-shift correction) |
 | CORAL | `coral` | Covariance alignment + LR |
-| IRM | `irm` | Invariant Risk Minimization (IRMv1; needs ≥2 source domains) |
+| IRM | `irm` | Invariant Risk Minimization (IRMv1, linear; only added when `--n_source_domains >= 2`) |
 | Prior recalibration | `prior_recalib` | Saerens EM prior-shift correction (no target labels) |
 | Platt scaling | `platt_scaling` | Sigmoid post-hoc calibration on source val |
 | Isotonic | `isotonic` | Isotonic post-hoc calibration on source val |
