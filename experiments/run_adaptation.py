@@ -16,6 +16,7 @@ Methods
   isotonic      — Isotonic post-hoc calibration on source val
   dann          — DANN with IWCV HP selection
   cdan          — Conditional DANN with IWCV HP selection
+  group_dro     — GroupDRO worst-center robust optimization (only with >=2 sources)
 
 Scenarios
 ---------
@@ -74,6 +75,7 @@ from experiments.baselines import (
     fit_platt_scaling, fit_isotonic,
 )
 from experiments.adaptation_methods import fit_coral, fit_dann, fit_cdan, fit_iw_erm, fit_irm
+from experiments.group_dro import fit_group_dro
 from utils.io import save_table_csv
 
 _TABLES = _ROOT / "outputs" / "tables"
@@ -102,6 +104,7 @@ _DISPLAY = {
     "prior_recalib":    "prior_recalib",
     "dann":             "dann",
     "cdan":             "cdan",
+    "group_dro":        "group_dro",
     "platt_scaling":    "platt",
     "isotonic":         "isotonic",
 }
@@ -155,6 +158,11 @@ def _run_one(
             arch_grid=arch_grid,
         ),
     ]
+
+    # GroupDRO is a multi-source domain-generalization method: it only differs
+    # from ERM when there are >=2 source centers to be robust across.
+    if len(src) >= 2:
+        results.append(fit_group_dro(src, tgt, seed=seed))
 
     flat_rows = [_flatten(r, scenario, seed) for r in results]
 
@@ -450,6 +458,7 @@ def _plot_calibration_curves(
         "isotonic":         "darkorange",
         "dann":             "tomato",
         "cdan":             "orchid",
+        "group_dro":        "teal",
     }
     linestyles = {
         "invariant_oracle": "--",
@@ -462,6 +471,7 @@ def _plot_calibration_curves(
         "isotonic":         "-.",
         "dann":             "-",
         "cdan":             "-",
+        "group_dro":        "--",
     }
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -516,7 +526,7 @@ def _print_implementation_report(
     print("  IMPLEMENTATION REPORT  (DA methods vs LR ERM baseline)")
     print(sep)
     idx = {(r["scenario"], r["method"]): r for r in agg}
-    da_methods = [m for m in methods if m in ("iw_erm", "coral", "irm", "prior_recalib", "dann", "cdan")]
+    da_methods = [m for m in methods if m in ("iw_erm", "coral", "irm", "prior_recalib", "dann", "cdan", "group_dro")]
 
     for m in da_methods:
         aurocs, nan_count = [], 0
@@ -592,6 +602,10 @@ def run_adaptation(
         "invariant_oracle", "all_observed", "iw_erm", "coral", "irm",
         "prior_recalib", "platt_scaling", "isotonic", "dann", "cdan",
     ]
+    # GroupDRO (multi-source domain generalization) is only meaningful, and only
+    # produced by _run_one, when there are >=2 source centers.
+    if n_source_domains >= 2:
+        methods = methods + ["group_dro"]
 
     all_rows:  list[dict] = []
     all_hp:    list[dict] = []

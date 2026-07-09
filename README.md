@@ -30,6 +30,10 @@ pip install -r requirements.txt
 # Main benchmark (7 core scenarios × 8 methods × 10 seeds)
 python -m experiments.run_adaptation
 
+# Multi-source benchmark with the GroupDRO domain-generalization baseline
+# (GroupDRO needs >=2 source centers; it degenerates to ERM with one source):
+python -m experiments.run_adaptation --n_source_domains 3 --out_prefix benchmark_3s1t
+
 # Include appendix scenarios (strong_covariate_shift, cure_shift)
 python -m experiments.run_adaptation --include_appendix --out_prefix benchmark_1s1t_full
 
@@ -68,6 +72,7 @@ Outputs are written to `outputs/tables/<prefix>_raw/summary/compact/hp_sweep.csv
 | Isotonic | `isotonic` | Isotonic post-hoc calibration on source val |
 | DANN | `dann` | Domain-adversarial network, IWCV HP tuning |
 | CDAN | `cdan` | Conditional DANN, IWCV HP tuning |
+| GroupDRO | `group_dro` | Worst-source-center robust optimization (domain generalization, no target data); only added when `--n_source_domains >= 2` |
 
 ## Generator
 
