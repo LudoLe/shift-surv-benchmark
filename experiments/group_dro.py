@@ -86,19 +86,40 @@ def _group_losses_and_grads(
 
 def train_group_dro(
     groups: list[tuple[np.ndarray, np.ndarray]],
-    lr: float = 0.1,
-    q_lr: float = 0.05,
+    X_val: np.ndarray | None = None,
+    y_val: np.ndarray | None = None,
+    lr: float = 0.05,
+    q_lr: float = 0.02,
     l2: float = 1e-3,
-    steps: int = 2000,
+    steps: int = 3000,
+    eval_every: int = 25,
 ) -> tuple[np.ndarray, float, np.ndarray]:
-    """Full-batch GroupDRO for a linear logistic model. Returns (theta, b, q)."""
+    """Full-batch GroupDRO for a linear logistic model, with early stopping on a
+    pooled source-validation loss.
+
+    The full-batch, deterministic exponentiated-gradient q update can, on some
+    real-data folds, over-concentrate all weight on a single hard source center
+    and drive the logits to diverge (a collapsed classifier).  The stochastic
+    minibatch GroupDRO of Sagawa et al. is self-regularized by gradient noise;
+    the full-batch version is not, so we instead keep the (theta, b) with the
+    lowest pooled source-validation logistic loss over training.  The validation
+    set is source-only — no target labels are used, so model selection stays
+    within the unsupervised-DA protocol.  Returns (theta, b, q).
+    """
     p = groups[0][0].shape[1]
     theta = np.zeros(p)
     b = 0.0
     G = len(groups)
     q = np.full(G, 1.0 / G)
 
-    for _ in range(steps):
+    def _val_loss(th: np.ndarray, bb: float) -> float:
+        z = X_val @ th + bb
+        return float(np.mean(np.logaddexp(0.0, z) - y_val * z))
+
+    best_theta, best_b, best_q = theta.copy(), b, q.copy()
+    best_val = _val_loss(theta, b) if X_val is not None else np.inf
+
+    for t in range(steps):
         losses, g_thetas, g_bs = _group_losses_and_grads(theta, b, groups)
         # Exponentiated-gradient ascent on q: upweight the worst (highest-loss) group.
         q = q * np.exp(q_lr * losses)
@@ -106,19 +127,26 @@ def train_group_dro(
         # Descent on the q-weighted risk (+ L2 on theta only).
         grad_theta = sum(q[g] * g_thetas[g] for g in range(G)) + l2 * theta
         grad_b = sum(q[g] * g_bs[g] for g in range(G))
-        theta -= lr * grad_theta
-        b -= lr * grad_b
-    return theta, b, q
+        theta = theta - lr * grad_theta
+        b = b - lr * grad_b
+        if X_val is not None and (t % eval_every == 0 or t == steps - 1):
+            vl = _val_loss(theta, b)
+            if vl < best_val:
+                best_val, best_theta, best_b, best_q = vl, theta.copy(), b, q.copy()
+
+    if X_val is None:
+        return theta, b, q
+    return best_theta, best_b, best_q
 
 
 def fit_group_dro(
     source_datasets: list[DomainDataset],
     target_dataset: DomainDataset,
     seed: int = 0,
-    lr: float = 0.1,
-    q_lr: float = 0.05,
+    lr: float = 0.05,
+    q_lr: float = 0.02,
     l2: float = 1e-3,
-    steps: int = 2000,
+    steps: int = 3000,
 ) -> dict:
     """
     GroupDRO on observed covariates x, treating each source center as a group.
@@ -151,14 +179,20 @@ def fit_group_dro(
     groups = [(scaler.transform(X).astype(float), y.astype(float))
               for X, y, _ in tr_parts]
 
-    theta, b, q = train_group_dro(groups, lr=lr, q_lr=q_lr, l2=l2, steps=steps)
+    # Pooled source-validation set for early stopping (scaled; no target leak).
+    X_val_all = np.vstack([p[0] for p in val_parts])
+    y_val_all = np.concatenate([p[1] for p in val_parts])
+    X_val_s = scaler.transform(X_val_all).astype(float)
+
+    theta, b, q = train_group_dro(
+        groups, X_val=X_val_s, y_val=y_val_all.astype(float),
+        lr=lr, q_lr=q_lr, l2=l2, steps=steps,
+    )
 
     def _predict(X_raw: np.ndarray) -> np.ndarray:
         return _sigmoid(scaler.transform(X_raw) @ theta + b)
 
     # Source-pooled = held-out validation across all domains (unbiased).
-    X_val_all = np.vstack([p[0] for p in val_parts])
-    y_val_all = np.concatenate([p[1] for p in val_parts])
     probs_val = _predict(X_val_all)
 
     source_scores = {}
