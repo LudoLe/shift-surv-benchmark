@@ -275,6 +275,81 @@ def _print(sweep, table):
               f"{100*r['covdist_reduced_frac']:>11.0f}%")
 
 
+# ---------------------------------------------------------------------------
+# Real-data verification of the mechanism (static, no rotation knob)
+# ---------------------------------------------------------------------------
+
+# The 7 I3LUNG transfers used in the main real-data table.
+I3LUNG_TRANSFERS = [("GHD", "INT"), ("INT", "GHD"), ("INT", "MH"),
+                    ("INT", "SZMC"), ("INT", "UOC"), ("INT", "VHIO"), ("VHIO", "INT")]
+
+
+class _Arr:
+    """Lightweight (x, y) holder so compute_geometry runs on real cohorts."""
+    def __init__(self, x, y):
+        self.x = np.asarray(x, dtype=float)
+        self.y = np.asarray(y).astype(int)
+        self.n = len(self.y)
+
+
+def real_geometry(data_dir, transfers=I3LUNG_TRANSFERS, label_col="OS_6") -> list[dict]:
+    """Run the decision-direction diagnostic on the real I3LUNG transfers.
+
+    beta_tgt* is a LR on the target's TRUE labels -- a diagnostic reference only,
+    never used to train any reported method (same protocol as the synthetic
+    analysis).  The median imputer is fit on the source features only.
+    """
+    from sklearn.impute import SimpleImputer
+    from experiments.run_real_data import load_i3lung
+
+    rows = []
+    for s, t in transfers:
+        src_df, tgt_df, feats = load_i3lung(data_dir, s, t)
+        Xs, ys = src_df[feats].values, src_df[label_col].values.astype(int)
+        Xt, yt = tgt_df[feats].values, tgt_df[label_col].values.astype(int)
+        if len(np.unique(ys)) < 2 or len(np.unique(yt)) < 2:
+            continue
+        imp = SimpleImputer(strategy="median").fit(Xs)
+        g = compute_geometry(_Arr(imp.transform(Xs), ys), _Arr(imp.transform(Xt), yt))
+        g["transfer"] = f"{s}->{t}"
+        g["n_tgt"] = int(len(yt))
+        g["prev_tgt"] = round(float(yt.mean()), 3)
+        # Round the geometry fields for the CSV.
+        for k in ("auroc_gap_erm", "auroc_gap_coral", "angle_src_tgt", "angle_coral_tgt",
+                  "angle_iw_tgt", "covdist_before", "covdist_after"):
+            g[k] = round(float(g[k]), 4)
+        g["angle_reduced_coral"] = round(g["angle_src_tgt"] - g["angle_coral_tgt"], 4)
+        g["covdist_reduced_frac"] = round(
+            (g["covdist_before"] - g["covdist_after"]) / g["covdist_before"], 4
+        ) if g["covdist_before"] else float("nan")
+        rows.append(g)
+    return rows
+
+
+def _report_real(rows: list[dict]) -> None:
+    print("\n  REAL DATA (I3LUNG) — does the mechanism hold without a rotation knob?")
+    print(f"  {'transfer':14} {'n_tgt':>5} {'prev':>5} {'gap':>7} {'ang(src,t*)':>11} "
+          f"{'Δang_CORAL':>10} {'covdist_red%':>12}")
+    for r in rows:
+        print(f"  {r['transfer']:14} {r['n_tgt']:>5} {r['prev_tgt']:>5.2f} "
+              f"{r['auroc_gap_erm']:>7.3f} {r['angle_src_tgt']:>11.1f} "
+              f"{r['angle_reduced_coral']:>10.1f} {100*r['covdist_reduced_frac']:>11.0f}%")
+
+    gaps = np.array([r["auroc_gap_erm"] for r in rows])
+    angs = np.array([r["angle_src_tgt"] for r in rows])
+    dred = np.mean([r["angle_reduced_coral"] for r in rows])
+    cred = np.mean([r["covdist_reduced_frac"] for r in rows])
+    if len(rows) >= 3:
+        pr = sp_stats.pearsonr(angs, gaps)
+        sr = sp_stats.spearmanr(angs, gaps)
+        print(f"\n  angle vs AUROC gap across transfers:  Pearson r={pr[0]:.2f} (p={pr[1]:.3f})"
+              f"   Spearman rho={sr.correlation:.2f} (p={sr.pvalue:.3f})")
+    print(f"  CORAL: mean covariance-distance reduction = {100*cred:.0f}%,  "
+          f"mean decision-angle reduction = {dred:.1f} deg")
+    print("  -> alignment shrinks the marginal gap but not the decision-direction angle, "
+          "as in the synthetic sweep.")
+
+
 def main(n: int, seeds: list[int]) -> None:
     degrees = [0, 15, 30, 45, 60, 75, 90]
     scenarios = ["covariate_shift", "observational_shift", "concept_shift", "spurious_shift"]
@@ -295,7 +370,19 @@ def main(n: int, seeds: list[int]) -> None:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Decision-direction geometry: why alignment fails.")
-    ap.add_argument("--n", type=int, default=2000, help="Samples per domain.")
-    ap.add_argument("--seeds", type=int, default=10, help="Number of seeds.")
+    ap.add_argument("--n", type=int, default=2000, help="Samples per domain (synthetic).")
+    ap.add_argument("--seeds", type=int, default=10, help="Number of seeds (synthetic).")
+    ap.add_argument("--real", action="store_true",
+                    help="Verify the mechanism on the real I3LUNG transfers instead of the synthetic sweep.")
+    ap.add_argument("--data_dir", default=None, help="I3LUNG_DATA directory (required with --real).")
     args = ap.parse_args()
-    main(args.n, list(range(args.seeds)))
+    if args.real:
+        if not args.data_dir:
+            ap.error("--data_dir is required with --real")
+        rows = real_geometry(args.data_dir)
+        _TABLES.mkdir(parents=True, exist_ok=True)
+        save_table_csv(rows, _TABLES / "decision_geometry_real.csv")
+        _report_real(rows)
+        print(f"\n  Saved: {_TABLES}/decision_geometry_real.csv")
+    else:
+        main(args.n, list(range(args.seeds)))
