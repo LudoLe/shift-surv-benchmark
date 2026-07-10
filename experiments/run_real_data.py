@@ -456,6 +456,7 @@ def _bootstrap_real_gaps(
     n_boot: int = 2000,
     seed: int = 0,
     n_bins: int = 10,
+    stratified: bool = True,
 ) -> list[dict]:
     """Patient-level paired bootstrap of AUROC/ECE and gaps vs a reference method.
 
@@ -481,6 +482,14 @@ def _bootstrap_real_gaps(
     * Gap sign convention: AUROC gap = method - reference (higher = method better);
       ECE gap = reference - method (higher = method better, i.e. lower ECE).
       The two-sided bootstrap p-value is 2*min(P(gap>0), P(gap<0)).
+    * By default the resample is *stratified by outcome*: positives and negatives
+      are resampled separately to their observed sizes, so every resample
+      preserves the target prevalence and always contains both classes (AUROC is
+      always defined). This removes the sampling noise from prevalence
+      fluctuation -- which only inflates the CIs -- and matters most for small or
+      low-prevalence target centers. Set stratified=False for an ordinary
+      (prevalence-varying) bootstrap. n_pos / n_neg are reported so the effective
+      power of each transfer is visible.
     """
     rng = np.random.default_rng(seed)
     y = np.asarray(y_tgt).astype(int)
@@ -491,8 +500,21 @@ def _bootstrap_real_gaps(
     if reference not in ens:
         return []
 
-    # Bootstrap indices shared across methods (paired).
-    idx = rng.integers(0, n, size=(n_boot, n))
+    # Class indices for stratified resampling and effective-power reporting.
+    pos_idx = np.where(y == 1)[0]
+    neg_idx = np.where(y == 0)[0]
+    n_pos, n_neg = len(pos_idx), len(neg_idx)
+
+    # Bootstrap indices shared across methods (paired). Stratified by default:
+    # resample each class to its observed size so every resample preserves the
+    # target prevalence and yields a defined AUROC. Falls back to an ordinary
+    # bootstrap if a class is empty (AUROC is undefined there regardless).
+    if stratified and n_pos > 0 and n_neg > 0:
+        pos_boot = pos_idx[rng.integers(0, n_pos, size=(n_boot, n_pos))]
+        neg_boot = neg_idx[rng.integers(0, n_neg, size=(n_boot, n_neg))]
+        idx = np.concatenate([pos_boot, neg_boot], axis=1)   # (n_boot, n)
+    else:
+        idx = rng.integers(0, n, size=(n_boot, n))
 
     def _auroc_ece(yb, pb):
         return auroc(yb, pb), ece(yb, pb, n_bins=n_bins)
@@ -551,6 +573,9 @@ def _bootstrap_real_gaps(
             "reference":          reference,
             "n_boot":             n_boot,
             "n_tgt":              n,
+            "n_pos":              int(n_pos),
+            "n_neg":              int(n_neg),
+            "stratified":         bool(stratified),
         })
     return rows
 
