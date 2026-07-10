@@ -251,6 +251,59 @@ def make_figure(sweep: list[dict], out_path: Path) -> None:
     plt.close(fig)
 
 
+def make_real_figure(rows: list[dict], out_path: Path) -> None:
+    """Real-data counterpart of the mechanism figure (no rotation knob):
+    (A) scatter of decision-direction angle vs AUROC gap across transfers;
+    (B) per-transfer covariance-distance reduction (large) vs decision-angle
+        reduction after CORAL (~0)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    names = [r["transfer"] for r in rows]
+    ang = np.array([r["angle_src_tgt"] for r in rows])
+    gap = np.array([r["auroc_gap_erm"] for r in rows])
+    dcov = np.array([100 * r["covdist_reduced_frac"] for r in rows])
+    dang = np.array([r["angle_reduced_coral"] for r in rows])
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.2))
+
+    # Panel A: gap vs decision-direction angle across real transfers.
+    ax1.scatter(ang, gap, color="#c1121f", zorder=3)
+    for x, y, nm in zip(ang, gap, names):
+        ax1.annotate(nm, (x, y), fontsize=7, xytext=(3, 3), textcoords="offset points")
+    title = "Real transfers: AUROC gap vs decision-direction angle"
+    if len(rows) >= 3:
+        b, a = np.polyfit(ang, gap, 1)
+        xs = np.linspace(ang.min(), ang.max(), 50)
+        ax1.plot(xs, b * xs + a, "--", color="#003049", lw=1)
+        r, p = sp_stats.pearsonr(ang, gap)
+        title = f"Real transfers: gap tracks decision angle (r={r:.2f}, p={p:.3f})"
+    ax1.set_title(title, fontsize=10)
+    ax1.set_xlabel(r"decision-direction angle $\angle(\beta_{src},\beta_{tgt}^*)$ (deg)")
+    ax1.set_ylabel("target AUROC gap")
+
+    # Panel B: CORAL's reduction of the marginal gap vs of the decision direction,
+    # both as a percentage so they are directly comparable on one axis.
+    ang_red_pct = 100.0 * dang / np.clip(ang, 1e-6, None)
+    x = np.arange(len(names))
+    w = 0.38
+    b1 = ax2.bar(x - w / 2, dcov, w, color="#2a9d8f", label="covariance distance")
+    b2 = ax2.bar(x + w / 2, ang_red_pct, w, color="#8d99ae", label="decision-direction angle")
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(names, rotation=45, ha="right", fontsize=7)
+    ax2.set_ylabel("reduction after CORAL (%)")
+    ax2.axhline(0, color="k", lw=0.5)
+    ax2.set_title("CORAL shrinks the marginal gap, not the decision direction", fontsize=10)
+    ax2.legend(handles=[b1, b2], loc="upper right", fontsize=8)
+
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    fig.savefig(out_path.with_suffix(".pdf"), bbox_inches="tight")
+    plt.close(fig)
+
+
 # ---------------------------------------------------------------------------
 # Console report
 # ---------------------------------------------------------------------------
@@ -382,7 +435,9 @@ if __name__ == "__main__":
         rows = real_geometry(args.data_dir)
         _TABLES.mkdir(parents=True, exist_ok=True)
         save_table_csv(rows, _TABLES / "decision_geometry_real.csv")
+        make_real_figure(rows, _FIGURES / "decision_geometry_real.png")
         _report_real(rows)
         print(f"\n  Saved: {_TABLES}/decision_geometry_real.csv")
+        print(f"  Saved: {_FIGURES}/decision_geometry_real.png (+ .pdf)")
     else:
         main(args.n, list(range(args.seeds)))
