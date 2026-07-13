@@ -60,6 +60,7 @@ Outputs are written to `outputs/tables/<prefix>_raw/summary/compact/hp_sweep.csv
 | `baseline_hazard_shift` | λ₀ only | AUROC stable, ECE degrades; recalibration helps |
 | `concept_shift` | w_d partial sign flip | AUROC drops, no method recovers |
 | `shape_shift` | Weibull shape ν | calibration degrades; ranking preserved |
+| `prior_shift` | P(Y): class-conditional resample, P(X\|Y) fixed | pure label shift; Prior-EM recovers ECE (calibration positive control, appendix) |
 | `strong_covariate_shift` | P(X): A_spu rotated 90° + noise | positive control, large gap (appendix) |
 | `cure_shift` | cure fraction | non-PH, appendix only |
 

@@ -37,6 +37,7 @@ SCENARIO_NAMES = [
     "baseline_hazard_shift",
     "shape_shift",
     "concept_shift",
+    "prior_shift",
     "strong_covariate_shift",
     "cure_shift",
 ]
@@ -73,6 +74,9 @@ def generate_scenario(
     if base is None:
         base = BaseParams(seed=seed)
 
+    # Pure label/prior-shift target prevalence (used only by prior_shift).
+    prevalence_target = kwargs.pop("prevalence_target", 0.60)
+
     shared_A_inv, shared_A_spu, shared_B_nl = make_shared_loading_matrices(base, seed=seed)
     gen = SyntheticGenerator(
         base,
@@ -101,6 +105,8 @@ def generate_scenario(
         source_p, target_p = _shape_shift(source_params, target_id, n_per_domain, **kwargs)
     elif name == "concept_shift":
         source_p, target_p = _concept_shift(source_params, target_id, n_per_domain, base, **kwargs)
+    elif name == "prior_shift":
+        source_p, target_p = _prior_shift(source_params, target_id, n_per_domain)
     elif name == "strong_covariate_shift":
         source_p, target_p = _strong_covariate_shift(source_params, target_id, n_per_domain, base, seed, **kwargs)
     elif name == "cure_shift":
@@ -116,7 +122,11 @@ def generate_scenario(
         target_p.censoring_lambda = censoring_lambda
 
     source_datasets = gen.generate_domains(source_p)
-    target_dataset = gen.generate_domain(target_p, domain_id=target_id)
+    if name == "prior_shift":
+        target_dataset = _generate_prior_shift_target(
+            gen, target_p, target_id, n_per_domain, prevalence_target, seed)
+    else:
+        target_dataset = gen.generate_domain(target_p, domain_id=target_id)
 
     return {
         "source": source_datasets,
@@ -453,6 +463,73 @@ def _concept_shift(
     target.v = np.zeros(base.k_spu)
 
     return source_params, target
+
+
+def _prior_shift(
+    source_params: list[DomainParams],
+    target_id: int,
+    n: int,
+) -> tuple[list[DomainParams], DomainParams]:
+    """
+    Pure label / prior shift (P(Y) changes, P(X|Y) invariant).
+
+    The target uses exactly the same data-generating process as the source, so
+    the class-conditional feature distribution P(X|Y) is identical; only the
+    class prevalence P(Y) is changed, by class-conditional resampling in
+    ``_generate_prior_shift_target``.  This is the dual of covariate shift
+    (which changes P(X) with P(Y|X) fixed).
+
+    It is the assumption class of Saerens/EM prior adjustment, so it serves as a
+    *positive control* for calibration recovery: unsupervised prior adjustment
+    should recover calibration here, and its failure under baseline-hazard,
+    measurement, or concept shift is then attributable to a violated assumption
+    rather than to a broken method.
+    """
+    target = source_params[0].copy()
+    target.domain_id = target_id
+    target.n = n
+    return source_params, target
+
+
+def _generate_prior_shift_target(
+    gen: SyntheticGenerator,
+    target_p: DomainParams,
+    target_id: int,
+    n: int,
+    pi_target: float,
+    seed: int,
+) -> DomainDataset:
+    """Generate a source-identical target pool, then resample within each class to
+    the target prevalence ``pi_target`` -- P(X|Y) invariant, P(Y) shifted."""
+    pool_p = target_p.copy()
+    pool_p.n = max(n * 6, 3000)
+    pool = gen.generate_domain(pool_p, domain_id=target_id,
+                               seed=gen.base.seed + target_id * 1000 + 555)
+
+    rng = np.random.default_rng((seed + 777) & 0xFFFFFFFF)
+    pos = np.where(pool.y == 1)[0]
+    neg = np.where(pool.y == 0)[0]
+    if len(pos) == 0 or len(neg) == 0:   # degenerate pool -> fall back to no resampling
+        return gen.generate_domain(target_p, domain_id=target_id)
+
+    n_pos = int(round(n * pi_target))
+    n_neg = n - n_pos
+    sel = np.concatenate([
+        rng.choice(pos, size=n_pos, replace=len(pos) < n_pos),
+        rng.choice(neg, size=n_neg, replace=len(neg) < n_neg),
+    ])
+    rng.shuffle(sel)
+
+    def _pick(a):
+        return a[sel] if a is not None else None
+
+    return DomainDataset(
+        domain_id=target_id,
+        u_inv=pool.u_inv[sel], u_spu=pool.u_spu[sel],
+        x=pool.x[sel], eta=pool.eta[sel], T=pool.T[sel], y=pool.y[sel],
+        params=pool.params,
+        C=_pick(pool.C), t_obs=_pick(pool.t_obs), delta=_pick(pool.delta),
+    )
 
 
 def _strong_covariate_shift(

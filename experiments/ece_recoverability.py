@@ -216,7 +216,7 @@ def _print(rows, key):
 
 def main_synth(n, seeds):
     scenarios = ["no_shift", "covariate_shift", "observational_shift",
-                 "baseline_hazard_shift", "shape_shift", "concept_shift", "spurious_shift"]
+                 "baseline_hazard_shift", "prior_shift", "concept_shift", "spurious_shift"]
     rows = synthetic_table(scenarios, seeds, n)
     _TABLES.mkdir(parents=True, exist_ok=True)
     save_table_csv(rows, _TABLES / "ece_recoverability_synth.csv")
