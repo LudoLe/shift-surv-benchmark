@@ -183,20 +183,42 @@ _I3LUNG_TRANSFERS = [("GHD", "INT"), ("INT", "GHD"), ("INT", "MH"),
                      ("INT", "SZMC"), ("INT", "UOC"), ("INT", "VHIO"), ("VHIO", "INT")]
 
 
-def real_table(data_dir, transfers=_I3LUNG_TRANSFERS, label_col="OS_6"):
+_ROTTERDAM_TRANSFERS = [("Rotterdam", "GBSG2"), ("GBSG2", "Rotterdam")]
+
+
+def _row_from_transfer(Xs, ys, Xt, yt, name):
     from sklearn.impute import SimpleImputer
+    if len(np.unique(ys)) < 2 or len(np.unique(yt)) < 2:
+        return None
+    imp = SimpleImputer(strategy="median").fit(Xs)
+    g = compute_ece_recoverability([_Arr(imp.transform(Xs), ys)], _Arr(imp.transform(Xt), yt))
+    g["transfer"] = name
+    return g
+
+
+def real_table(data_dir, transfers=_I3LUNG_TRANSFERS, label_col="OS_6"):
     from experiments.run_real_data import load_i3lung
     out = []
     for s, t in transfers:
         src_df, tgt_df, feats = load_i3lung(data_dir, s, t)
-        Xs, ys = src_df[feats].values, src_df[label_col].values.astype(int)
-        Xt, yt = tgt_df[feats].values, tgt_df[label_col].values.astype(int)
-        if len(np.unique(ys)) < 2 or len(np.unique(yt)) < 2:
-            continue
-        imp = SimpleImputer(strategy="median").fit(Xs)
-        g = compute_ece_recoverability([_Arr(imp.transform(Xs), ys)], _Arr(imp.transform(Xt), yt))
-        g["transfer"] = f"{s}->{t}"
-        out.append(g)
+        g = _row_from_transfer(src_df[feats].values, src_df[label_col].values.astype(int),
+                               tgt_df[feats].values, tgt_df[label_col].values.astype(int), f"{s}->{t}")
+        if g is not None:
+            out.append(g)
+    return out
+
+
+def real_table_public(registry_name, tau, transfers=_ROTTERDAM_TRANSFERS, label_col="event"):
+    """Same diagnostic on a public multicentric registry (e.g. rotterdam_gbsg),
+    binarised at horizon ``tau`` months."""
+    from experiments.run_real_data import load_public_transfer
+    out = []
+    for s, t in transfers:
+        src_df, tgt_df, feats = load_public_transfer(registry_name, s, t, tau, label_col=label_col)
+        g = _row_from_transfer(src_df[feats].values, src_df[label_col].values.astype(int),
+                               tgt_df[feats].values, tgt_df[label_col].values.astype(int), f"{s}->{t}")
+        if g is not None:
+            out.append(g)
     return out
 
 
@@ -233,18 +255,27 @@ if __name__ == "__main__":
     ap.add_argument("--n", type=int, default=2000)
     ap.add_argument("--seeds", type=int, default=10)
     ap.add_argument("--real", action="store_true")
-    ap.add_argument("--data_dir", default=None)
+    ap.add_argument("--dataset", default="i3lung", choices=["i3lung", "rotterdam_gbsg"])
+    ap.add_argument("--data_dir", default=None, help="I3LUNG_DATA directory (i3lung only).")
+    ap.add_argument("--tau", type=float, default=None, help="Horizon in months (public registry).")
     args = ap.parse_args()
     if args.real:
-        if not args.data_dir:
-            ap.error("--data_dir is required with --real")
-        rows = real_table(args.data_dir)
+        if args.dataset == "i3lung":
+            if not args.data_dir:
+                ap.error("--data_dir is required with --dataset i3lung")
+            rows, label, out = real_table(args.data_dir), "real i3lung transfers", "ece_recoverability_real.csv"
+        else:
+            import importlib
+            reg = importlib.import_module("data.registry_rotterdam_gbsg")
+            tau = args.tau if args.tau is not None else float(reg.TAU)
+            rows = real_table_public("rotterdam_gbsg", tau)
+            label, out = f"rotterdam_gbsg (breast cancer, tau={tau:g}m)", f"ece_recoverability_rotterdam_tau{tau:g}.csv"
         _TABLES.mkdir(parents=True, exist_ok=True)
-        save_table_csv(rows, _TABLES / "ece_recoverability_real.csv")
-        print("\n  ECE RECOVERABILITY (real i3lung transfers)")
+        save_table_csv(rows, _TABLES / out)
+        print(f"\n  ECE RECOVERABILITY ({label})")
         _print(rows, "transfer")
         print("\n  unsup_gain ~ 0 (Prior-EM can backfire); label_gain = calibration a few "
               "labeled target samples would recover.")
-        print(f"  Saved: {_TABLES}/ece_recoverability_real.csv")
+        print(f"  Saved: {_TABLES}/{out}")
     else:
         main_synth(args.n, list(range(args.seeds)))

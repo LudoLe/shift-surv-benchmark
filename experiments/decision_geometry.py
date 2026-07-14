@@ -315,6 +315,35 @@ def real_geometry_loco(data_dir, with_dann=False, seed=0):
     return rows
 
 
+def real_geometry_public(registry_name, tau, with_dann=False, seed=0,
+                         transfers=(("Rotterdam", "GBSG2"), ("GBSG2", "Rotterdam"))):
+    """Decision-direction geometry on a public registry's directional transfers.
+    These are *single-source* (one center -> one center), so GroupDRO and IRM
+    reduce to ERM (no multiple environments); ERM/CORAL/IW carry the argument."""
+    from sklearn.impute import SimpleImputer
+    from experiments.run_real_data import load_public_transfer
+    keys, _ = _keys(with_dann)
+    rows = []
+    for s, t in transfers:
+        src_df, tgt_df, feats = load_public_transfer(registry_name, s, t, tau, label_col="event")
+        Xs, ys = src_df[feats].values, src_df["event"].values.astype(int)
+        Xt, yt = tgt_df[feats].values, tgt_df["event"].values.astype(int)
+        if len(np.unique(ys)) < 2 or len(np.unique(yt)) < 2:
+            continue
+        imp = SimpleImputer(strategy="median").fit(Xs)
+        g = compute_geometry([_Arr(imp.transform(Xs), ys)], _Arr(imp.transform(Xt), yt),
+                             with_dann=with_dann, seed=seed)
+        g["fold"] = f"{s}->{t}"
+        g["n_tgt"] = int(len(yt))
+        g["prev_tgt"] = round(float(np.asarray(yt).mean()), 3)
+        cb, ca = g["covdist_before"], g["covdist_after"]
+        g["covdist_reduced_frac"] = round((cb - ca) / cb, 4) if cb else float("nan")
+        for k in keys:
+            g[k] = round(float(g[k]), 4)
+        rows.append(g)
+    return rows
+
+
 # ---------------------------------------------------------------------------
 # Figures
 # ---------------------------------------------------------------------------
@@ -445,22 +474,31 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Decision-direction geometry: why alignment fails.")
     ap.add_argument("--n", type=int, default=2000, help="Samples per domain (synthetic).")
     ap.add_argument("--seeds", type=int, default=10, help="Number of seeds (synthetic).")
-    ap.add_argument("--real", action="store_true", help="Run on the i3lung LOCO folds.")
-    ap.add_argument("--data_dir", default=None, help="I3LUNG_DATA directory (with --real).")
+    ap.add_argument("--real", action="store_true", help="Run on real data (i3lung LOCO or a public registry).")
+    ap.add_argument("--dataset", default="i3lung", choices=["i3lung", "rotterdam_gbsg"])
+    ap.add_argument("--data_dir", default=None, help="I3LUNG_DATA directory (i3lung only).")
+    ap.add_argument("--tau", type=float, default=None, help="Horizon in months (public registry).")
     ap.add_argument("--with_dann", action="store_true",
                     help="Also add a linear surrogate of DANN/CDAN (needs TensorFlow).")
     args = ap.parse_args()
 
     _, methods = _keys(args.with_dann)
     if args.real:
-        if not args.data_dir:
-            ap.error("--data_dir is required with --real")
-        rows = real_geometry_loco(args.data_dir, with_dann=args.with_dann)
+        if args.dataset == "rotterdam_gbsg":
+            import importlib
+            reg = importlib.import_module("data.registry_rotterdam_gbsg")
+            tau = args.tau if args.tau is not None else float(reg.TAU)
+            rows = real_geometry_public("rotterdam_gbsg", tau, with_dann=args.with_dann)
+        else:
+            if not args.data_dir:
+                ap.error("--data_dir is required with --dataset i3lung")
+            rows = real_geometry_loco(args.data_dir, with_dann=args.with_dann)
+        tag = "real" if args.dataset == "i3lung" else f"real_{args.dataset}"
         _TABLES.mkdir(parents=True, exist_ok=True)
-        save_table_csv(rows, _TABLES / "decision_geometry_real.csv")
-        make_real_figure(rows, methods, _FIGURES / "decision_geometry_real.png")
+        save_table_csv(rows, _TABLES / f"decision_geometry_{tag}.csv")
+        make_real_figure(rows, methods, _FIGURES / f"decision_geometry_{tag}.png")
         _print_real(rows, methods)
-        print(f"\n  Saved: {_TABLES}/decision_geometry_real.csv")
-        print(f"  Saved: {_FIGURES}/decision_geometry_real.png (+ .pdf)")
+        print(f"\n  Saved: {_TABLES}/decision_geometry_{tag}.csv")
+        print(f"  Saved: {_FIGURES}/decision_geometry_{tag}.png (+ .pdf)")
     else:
         main(args.n, list(range(args.seeds)), args.with_dann)
