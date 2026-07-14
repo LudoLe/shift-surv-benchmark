@@ -440,7 +440,7 @@ def _print_synth(sweep, table, methods):
 
 def _print_real(rows, methods):
     hdr = "".join(f"{m:>11}" for m in methods)
-    print("\n  REAL DATA (i3lung LOCO) — angle(beta_method, beta_tgt*) per fold")
+    print("\n  REAL DATA — angle(beta_method, beta_tgt*) per fold/transfer")
     print(f"  {'fold':10}{'n_tgt':>6}{'prev':>6}{hdr}  {'covdist_red%':>12}")
     for r in rows:
         angs = "".join(f"{r[f'angle_{m}']:>11.1f}" for m in methods)
