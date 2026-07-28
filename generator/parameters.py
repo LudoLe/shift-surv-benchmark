@@ -195,8 +195,16 @@ def default_source_params(
     """
     Return a list of identical source domain parameters (no-shift baseline).
     All domains share the same Θ_d; shift scenarios override specific fields.
+
+    Field values come from the ``domain_defaults`` block of
+    configs/generator.yaml, falling back to the dataclass defaults below when
+    the config is unavailable.
     """
-    default_w = np.array([1.0, 0.5, -0.5][: base.k_inv])
+    from .config import domain_defaults
+
+    defaults = domain_defaults()
+
+    default_w = np.asarray(defaults.get("w", [1.0, 0.5, -0.5]), dtype=float)[: base.k_inv]
     if len(default_w) < base.k_inv:
         default_w = np.pad(default_w, (0, base.k_inv - len(default_w)))
 
@@ -207,12 +215,12 @@ def default_source_params(
             mu_spu=np.zeros(base.k_spu),
             A_inv=A_inv.copy(),
             A_spu=A_spu.copy(),
-            sigma_noise=0.5,
-            beta0=0.0,
+            sigma_noise=defaults.get("sigma_noise", 0.5),
+            beta0=defaults.get("beta0", 0.0),
             w=default_w.copy(),
             v=np.zeros(base.k_spu),
-            lambda0=0.02,
-            nu=1.5,
+            lambda0=defaults.get("lambda0", 0.02),
+            nu=defaults.get("nu", 1.5),
             n=n_per_domain,
             domain_id=d,
         )

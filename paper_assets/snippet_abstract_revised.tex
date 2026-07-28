@@ -1,0 +1,55 @@
+% ---------------------------------------------------------------------------
+% Revised abstract. Drop-in replacement for the \begin{abstract}...\end{abstract}
+% block in shift-surv-paper-PATCHED.tex.
+%
+% Incorporates the review comments, plus one correction that came out of
+% checking the code:
+%
+%   "best adaptation method" is chosen PER TRANSFER as the one with the largest
+%   observed gap on the target (meta_analysis.py:164, pool_best_per_transfer).
+%   That selection sees target labels, so it is a winner's-curse upper bound --
+%   deliberately optimistic. Stating it makes the negative result stronger, not
+%   weaker: not even a retrospectively chosen best method beats ERM. Left
+%   unstated, a reviewer who finds it reads it as a concealed optimism.
+%
+% Terminology: "label-prior shift" is kept as the scenario name and tied to the
+% label-shift literature at first mention, because "Label-prior" is baked into
+% seven figure images. Switching to "label shift" everywhere means regenerating
+% all of them.
+%
+% Length: ~270 words, down from ~400. IEEE conference abstracts run 150-250.
+% ---------------------------------------------------------------------------
+
+\begin{abstract}
+Clinical risk models often lose performance when applied at centers other than
+the one where they were developed. Unsupervised domain adaptation (DA) and
+domain generalization (DG) are widely proposed remedies, but real-world data
+rarely identify which shift mechanism caused the degradation, so method failure
+cannot be separated from an intrinsically unsolvable transfer. We introduce
+SHIFT-SURV, a controlled benchmark for fixed-horizon survival-risk prediction
+that independently varies covariate, measurement, spurious-association,
+baseline-hazard, label-prior, and concept shift against a known invariant
+oracle. Continuous event times are generated from a latent-factor Weibull
+proportional-hazards model, with invariant and spurious factors mapped to
+tabular, biomarker-like covariates and dichotomized at a six-month horizon.
+
+Across per-center sample sizes of 250--2{,}000, CORAL, DANN, CDAN, IRM, and
+GroupDRO do not outperform empirical risk minimization (ERM) on target AUROC,
+including where the oracle shows substantial recoverable signal: under
+measurement shift the ERM-to-oracle AUROC gap reaches $0.21$ and remains
+essentially unrecovered at the largest sample size. Mechanistic analysis shows
+why. CORAL halves the source--target covariance discrepancy while leaving the
+angle between the learned predictive direction and the target-optimal direction
+essentially unchanged.
+
+Discrimination and calibration deteriorate independently. Unsupervised
+recalibration improves calibration under pure label-prior shift, increasingly so
+with the amount of unlabeled target data, and worsens it when its assumptions
+are violated. Across center transfers in I3LUNG and a public breast-cancer
+registry, a random-effects meta-analysis finds no clinically meaningful gain
+over ERM for the best adaptation method, selected per transfer by the largest
+observed target gap and therefore an optimistic upper bound: its 95\% confidence
+interval excludes an absolute AUROC improvement of $0.02$. SHIFT-SURV separates
+irreducible transport difficulty from practical method failure and identifies
+when unsupervised transport methods fail in survival-risk prediction.
+\end{abstract}

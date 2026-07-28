@@ -27,6 +27,7 @@ from typing import Optional
 
 from .parameters import BaseParams, DomainParams, default_source_params, make_shared_loading_matrices
 from .base_generator import SyntheticGenerator, DomainDataset
+from .config import base_kwargs, load_config, scenario_kwargs
 
 
 SCENARIO_NAMES = [
@@ -71,8 +72,14 @@ def generate_scenario(
     if name not in SCENARIO_NAMES:
         raise ValueError(f"Unknown scenario '{name}'.  Choose from: {SCENARIO_NAMES}")
 
+    # Config-declared values fill in whatever the caller did not pass explicitly;
+    # explicit arguments always win.  See configs/generator.yaml.
+    cfg = load_config()
     if base is None:
-        base = BaseParams(seed=seed)
+        base = BaseParams(**{**base_kwargs(cfg), "seed": seed})
+
+    for key, value in scenario_kwargs(name, cfg).items():
+        kwargs.setdefault(key, value)
 
     # Pure label/prior-shift target prevalence (used only by prior_shift).
     prevalence_target = kwargs.pop("prevalence_target", 0.60)
@@ -102,7 +109,7 @@ def generate_scenario(
     elif name == "baseline_hazard_shift":
         source_p, target_p = _baseline_hazard_shift(source_params, target_id, n_per_domain, **kwargs)
     elif name == "shape_shift":
-        source_p, target_p = _shape_shift(source_params, target_id, n_per_domain, **kwargs)
+        source_p, target_p = _shape_shift(source_params, target_id, n_per_domain, base, **kwargs)
     elif name == "concept_shift":
         source_p, target_p = _concept_shift(source_params, target_id, n_per_domain, base, **kwargs)
     elif name == "prior_shift":
@@ -168,6 +175,9 @@ def _covariate_shift(
     mu_inv_shift_scale: float = 1.5,
     mu_spu_shift_scale: float = 1.5,
     sigma_noise_target: float = 0.8,
+    source_mu_scale: float = 0.3,
+    source_sigma_base: float = 0.5,
+    source_sigma_jitter: float = 0.1,
 ) -> tuple[list[DomainParams], DomainParams]:
     """
     Pure covariate shift — only the latent means shift, A_inv unchanged.
@@ -182,9 +192,10 @@ def _covariate_shift(
     rng = np.random.default_rng(seed + 10)
 
     for sp in source_params:
-        sp.mu_inv = rng.standard_normal(base.k_inv) * 0.3
-        sp.mu_spu = rng.standard_normal(base.k_spu) * 0.3
-        sp.sigma_noise = 0.5 + rng.uniform(-0.1, 0.1)
+        sp.mu_inv = rng.standard_normal(base.k_inv) * source_mu_scale
+        sp.mu_spu = rng.standard_normal(base.k_spu) * source_mu_scale
+        sp.sigma_noise = source_sigma_base + rng.uniform(-source_sigma_jitter,
+                                                          source_sigma_jitter)
 
     # Shift direction orthogonal to w → w^T mu_inv = 0 → stable prevalence
     w_src = source_params[0].w.copy()
@@ -213,6 +224,9 @@ def _observational_shift(
     mu_spu_shift_scale: float = 1.5,
     sigma_noise_target: float = 0.8,
     a_inv_rotation_angle: float = np.pi / 3,   # 60 degrees
+    source_mu_scale: float = 0.3,
+    source_sigma_base: float = 0.5,
+    source_sigma_jitter: float = 0.1,
 ) -> tuple[list[DomainParams], DomainParams]:
     """
     Measurement-induced observational shift — A_inv rotated in the target.
@@ -231,9 +245,10 @@ def _observational_shift(
     rng = np.random.default_rng(seed + 10)
 
     for sp in source_params:
-        sp.mu_inv = rng.standard_normal(base.k_inv) * 0.3
-        sp.mu_spu = rng.standard_normal(base.k_spu) * 0.3
-        sp.sigma_noise = 0.5 + rng.uniform(-0.1, 0.1)
+        sp.mu_inv = rng.standard_normal(base.k_inv) * source_mu_scale
+        sp.mu_spu = rng.standard_normal(base.k_spu) * source_mu_scale
+        sp.sigma_noise = source_sigma_base + rng.uniform(-source_sigma_jitter,
+                                                          source_sigma_jitter)
 
     w_src = source_params[0].w.copy()
     d = np.ones(base.k_inv, dtype=float)
@@ -264,6 +279,7 @@ def _spurious_shift(
     seed: int,
     rho_source: float = 0.70,
     spu_mean_target: float = -2.5,
+    sigma_noise_target: float = 0.5,
 ) -> tuple[list[DomainParams], DomainParams]:
     """
     Spurious shortcut shift.  v_d = 0 throughout (spurious factors never
@@ -327,7 +343,7 @@ def _spurious_shift(
     target.v = np.zeros(base.k_spu)
     target.mu_spu = np.full(base.k_spu, spu_mean_target)  # spurious mean shifts
     target.latent_cov = cov_tgt                            # no within-domain correlation
-    target.sigma_noise = 0.5   # same noise as source
+    target.sigma_noise = sigma_noise_target   # same noise as source by default
 
     return source_params, target
 
@@ -339,6 +355,9 @@ def _baseline_hazard_shift(
     lambda0_target: float = 0.06,
     nu_target: float = 1.5,
     beta0_target: float = 0.0,
+    source_lambda0_base: float = 0.020,
+    source_lambda0_step: float = 0.002,
+    source_nu: float = 1.5,
 ) -> tuple[list[DomainParams], DomainParams]:
     """
     Baseline hazard shift — λ_{0,d} varies; β_{0,d}=0 and ν_d held fixed.
@@ -359,8 +378,8 @@ def _baseline_hazard_shift(
     # Sources: mild variation in baseline rate (~±10% around 0.02)
     for i, sp in enumerate(source_params):
         sp.beta0 = 0.0
-        sp.lambda0 = 0.020 + i * 0.002   # 0.020, 0.022, 0.024 — mild variation
-        sp.nu = 1.5
+        sp.lambda0 = source_lambda0_base + i * source_lambda0_step   # 0.020, 0.022, 0.024
+        sp.nu = source_nu
 
     target = source_params[0].copy()
     target.domain_id = target_id
@@ -379,7 +398,10 @@ def _shape_shift(
     source_params: list[DomainParams],
     target_id: int,
     n: int,
+    base: BaseParams,
     nu_target: float = 0.7,
+    source_nu: float = 1.5,
+    source_lambda0: float = 0.02,
 ) -> tuple[list[DomainParams], DomainParams]:
     """
     Weibull shape shift — nu varies, lambda0 and everything else fixed.
@@ -403,8 +425,8 @@ def _shape_shift(
     same mean eta, same tau, but different nu → adjust lambda0 to compensate.
     """
     for sp in source_params:
-        sp.nu = 1.5
-        sp.lambda0 = 0.02
+        sp.nu = source_nu
+        sp.lambda0 = source_lambda0
 
     target = source_params[0].copy()
     target.domain_id = target_id
@@ -414,8 +436,8 @@ def _shape_shift(
     # P(T<=tau) = 1 - exp(-lambda0 * tau^nu * exp(mean_eta))
     # mean_eta ~ 0 for zero-mean latents → exp(mean_eta) ~ 1
     # Solve: lambda0_tgt * tau^nu_tgt = lambda0_src * tau^nu_src
-    tau = 6.0
-    target.lambda0 = 0.02 * (tau ** 1.5) / (tau ** nu_target)
+    tau = base.tau
+    target.lambda0 = source_lambda0 * (tau ** source_nu) / (tau ** nu_target)
 
     return source_params, target
 
@@ -541,6 +563,8 @@ def _strong_covariate_shift(
     spu_mean_target: float = 3.0,
     sigma_noise_target: float = 1.5,
     a_spu_rotation_angle: float = np.pi / 2,   # 90 degrees
+    source_mu_spu_scale: float = 0.2,
+    source_sigma_noise: float = 0.5,
 ) -> tuple[list[DomainParams], DomainParams]:
     """
     Strong observational covariate shift — positive control for DA methods.
@@ -601,8 +625,8 @@ def _strong_covariate_shift(
     # Source domains: standard parameters, small inter-center noise variation
     for sp in source_params:
         sp.v = np.zeros(base.k_spu)
-        sp.mu_spu = rng.standard_normal(base.k_spu) * 0.2   # mild source variation
-        sp.sigma_noise = 0.5
+        sp.mu_spu = rng.standard_normal(base.k_spu) * source_mu_spu_scale
+        sp.sigma_noise = source_sigma_noise
 
     # 90° rotation matrix in the k_spu = 2 dimensional spurious loading space
     c, s = np.cos(a_spu_rotation_angle), np.sin(a_spu_rotation_angle)

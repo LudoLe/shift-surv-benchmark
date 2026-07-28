@@ -1,0 +1,36 @@
+% ---------------------------------------------------------------------------
+% Author block — fallback variant, if \linebreak does not give a clean 2x2.
+%
+% Groups the four authors into THREE blocks by shared affiliation. Three blocks
+% already fit one IEEEtran row (the current draft fits three before wrapping),
+% so this needs no row-breaking trick at all and cannot mis-wrap. It is also
+% two lines shorter, which helps the page budget.
+%
+% Trade-off: it drops the 1st/2nd/3rd/4th ordinals, which are placeholders from
+% the IEEE template and are usually removed in submitted papers anyway. Author
+% order is still carried by reading order. If the ordinals must stay, keep the
+% 2x2 version instead -- do not put them on grouped blocks, since "1st, 2nd"
+% over a shared block reads as if both share one position.
+%
+% Drop-in replacement for the whole \author{...} in the patched .tex.
+% ---------------------------------------------------------------------------
+
+\author{
+\IEEEauthorblockN{Ludovica Lerma, Vanja Miskovic}
+\IEEEauthorblockA{\textit{DEIB, Politecnico di Milano} \\
+\textit{Istituto Nazionale dei Tumori}\\
+Milan, Italy \\
+\{ludovica.lerma, vanja.miskovic\}@polimi.it}
+\and
+\IEEEauthorblockN{Arsela Prelaj}
+\IEEEauthorblockA{\textit{Medical Oncology Department} \\
+\textit{Istituto Nazionale dei Tumori}\\
+Milan, Italy \\
+arsela.prelaj@istitutonazionaledeitumori.it}
+\and
+\IEEEauthorblockN{Francesco Trov\`o}
+\IEEEauthorblockA{\textit{DEIB} \\
+\textit{Politecnico di Milano}\\
+Milan, Italy \\
+francesco.trovo1@polimi.it}
+}

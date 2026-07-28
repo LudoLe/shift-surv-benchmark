@@ -1,0 +1,56 @@
+% ---------------------------------------------------------------------------
+% Discussion additions
+%
+% Two items from the review:
+%   (1) "clinically sound / bridge the gap" -> what a reader who builds clinical
+%       models should actually do differently. Insert AFTER the first Discussion
+%       paragraph (the one that states the findings) and BEFORE the limitations.
+%   (2) "gestire dati multimodali in oncologia usando FM 2+" -> future work.
+%       Insert AFTER the limitations paragraph, before the Conclusion.
+%
+% CITATIONS: keys marked <TODO-CITE> are placeholders. Do not compile them as
+% real \cite commands until the references are verified -- the bibliography
+% already carries six entries flagged [Verify].
+% ---------------------------------------------------------------------------
+
+
+% ===== Insert after the findings paragraph of the Discussion =================
+
+These results carry a practical consequence for how a transfer is approached in
+a multi-center clinical project. The two shift mechanisms that are measurable
+without target labels --- a change in the covariate distribution and a change in
+event prevalence --- are also the two that behave most differently: the second is
+correctable post hoc, while the first is not the reason discrimination is lost.
+A pragmatic protocol follows. Before deploying a model at a new center, measure
+both quantities, since both are computable from unlabeled data. If prevalence
+has moved, recalibrate, because that is the one regime in which an unsupervised
+correction demonstrably restores the probabilities that a clinical decision
+actually depends on. If discrimination has dropped, our results indicate that no
+amount of unsupervised alignment will return it, and effort is better spent on
+the causes upstream of the model: harmonizing how the predictors are measured
+across centers, or acquiring a modest number of labels at the target site. The
+contribution we intend here is diagnostic rather than prescriptive. A reported
+transfer failure conflates two things --- a transfer that is intrinsically
+unsolvable from unlabeled data, and a method that underperforms on a solvable
+one --- and separating them is what tells a clinical team whether to change the
+method or to change the data. The oracle makes that separation measurable on
+synthetic data, and the two measurable mechanisms approximate it on real
+cohorts.
+
+
+% ===== Insert after the limitations paragraph, before the Conclusion =========
+
+A further extension concerns modality. We deliberately study tabular clinical
+data, the most widely available modality across centers and the one on which
+most deployed risk models are built, which also makes it the setting in which
+the invariance assumptions can be stated and tested most cleanly. Oncology is
+nonetheless moving toward decisions informed by imaging, digital pathology and
+molecular profiling alongside the clinical record, and foundation models are
+increasingly proposed to combine them <TODO-CITE: multimodal oncology FM>.
+Multi-center shift is not removed by this move and may be sharpened by it, since
+scanners, staining protocols and sequencing pipelines differ across sites in
+ways that clinical variables do not. Whether a pretrained representation
+transports the invariant signal that alignment fails to recover here is an open
+question, and the diagnostic framing of this paper --- a known oracle, one
+mechanism perturbed at a time --- transfers to that setting unchanged, since it
+constrains the evaluation design rather than the model class.

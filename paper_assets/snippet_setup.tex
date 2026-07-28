@@ -1,0 +1,63 @@
+% ---------------------------------------------------------------------------
+% Setup additions for Section "The SHIFT-SURV Benchmark"
+%
+% Two items from the review:
+%   (1) "metriche che usi"  -> the metrics are never defined in the draft.
+%       New subsection below; put it after "Methods evaluated", i.e. immediately
+%       before "Protocol", so the reader has methods + metrics before Results.
+%   (2) "invariant oracle -> oracolo di learning, piu' vicino alla realta'"
+%       -> replacement for the existing "Invariant oracle" subsection.
+%
+% The shift parameters the review also asked for are in table_scenarios.tex
+% (generated from configs/generator.yaml), which replaces the current
+% tab:scenarios environment.
+% ---------------------------------------------------------------------------
+
+
+% ===== REPLACES the current \subsection{Invariant oracle} =====================
+
+\subsection{Invariant oracle}
+Because the true latent factors are known, we fit a logistic regression on
+$u_{\mathrm{inv}}$ under the same training and evaluation protocol as every
+other method. The oracle is deliberately a \emph{learning} oracle rather than an
+information-theoretic bound: it is a model of the same family, fit on the same
+finite sample, with the same train/validation split and the same horizon, and
+differs from the compared methods in one respect only --- it reads the invariant
+representation instead of the noisy observation $x$. It is therefore not the
+best achievable predictor, but the best that a learner of this class could reach
+if the transportable part of the signal were handed to it directly, which makes
+the headroom we report a conservative and attainable target rather than an
+unreachable ceiling. The oracle is not deployable, since $u_{\mathrm{inv}}$ is
+unobserved. Its discrimination sets the reference against which we quantify how
+much of the cross-center gap each method actually recovers, and its calibration
+provides a floor on the calibration error achievable under a given shift.
+
+
+% ===== NEW subsection, insert before \subsection{Protocol} ===================
+
+\subsection{Evaluation metrics}
+Every method outputs a predicted probability that the event occurs by the
+horizon, so we evaluate two properties that a transported risk model must have
+and that can fail independently. Discrimination is measured by the area under
+the receiver operating characteristic curve (AUROC), which depends only on how
+patients are ranked and is unchanged by any monotone rescaling of the
+predictions. Calibration is measured by the expected calibration error (ECE)
+over $B=10$ equal-width probability bins,
+\begin{equation}
+\mathrm{ECE} \;=\; \sum_{b=1}^{B} \frac{n_b}{n}\,
+  \bigl\lvert \bar{y}_b - \bar{\hat{p}}_b \bigr\rvert ,
+\end{equation}
+where $n_b$ is the number of target patients whose predicted probability falls
+in bin $b$, and $\bar{y}_b$ and $\bar{\hat{p}}_b$ are the observed event rate and
+the mean predicted probability within that bin. Reporting both is necessary
+rather than decorative: prior adjustment and Platt scaling are monotone
+transformations of the ERM scores and so leave AUROC unchanged by construction,
+and an evaluation restricted to discrimination would be blind to precisely the
+methods that act on calibration.
+
+Both metrics are computed on the held-out target center, whose labels are used
+only for evaluation and never for fitting or for hyperparameter selection. We
+fix in advance a margin of $0.02$ AUROC as the smallest improvement that would
+be clinically meaningful, and read a confidence interval contained entirely
+within $\pm 0.02$ as evidence of no meaningful gain, rather than as an
+inconclusive comparison.

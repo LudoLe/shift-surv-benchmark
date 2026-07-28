@@ -92,6 +92,22 @@ The data-generating process is a Weibull proportional hazards model:
 
 Each shift scenario modifies exactly one component of the DGP.
 
+## Configuration
+
+Every structural constant, per-domain default and per-scenario shift parameter is declared in
+[`configs/generator.yaml`](configs/generator.yaml) — the single place to read or change what the
+benchmark ran with. Point `SHIFT_SURV_CONFIG` at another file to use a different one:
+
+```bash
+SHIFT_SURV_CONFIG=configs/my_variant.yaml python -m experiments.run_adaptation
+```
+
+The Python defaults mirror the config exactly, so the code also runs without it (and without
+`pyyaml`). `tests/test_config.py` enforces both halves of that contract: the YAML values must
+equal the Python defaults, and generation must be bit-identical with and without the config.
+Explicit keyword arguments still override the config, which is how the sweeps and ablations vary
+one parameter at a time.
+
 ## Protocol
 
 - 1 source domain + 1 target domain, 500 samples each

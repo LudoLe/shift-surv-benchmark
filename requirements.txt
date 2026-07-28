@@ -11,6 +11,10 @@ scikit-learn>=1.3
 pandas>=2.0
 matplotlib>=3.7
 
+# Benchmark parameters are declared in configs/generator.yaml (generator/config.py).
+# Without pyyaml the code falls back to the identical Python defaults.
+pyyaml>=6.0
+
 # Domain-adaptation methods (DANN/CDAN/CORAL) run on TensorFlow via the ADAPT library.
 # TF op-level nondeterminism means DANN/CDAN are not bit-reproducible across machines;
 # results are reported as mean ± 95% CI over seeds for this reason.
