@@ -457,6 +457,7 @@ def _bootstrap_real_gaps(
     seed: int = 0,
     n_bins: int = 10,
     stratified: bool = True,
+    replicate_sink: list | None = None,
 ) -> list[dict]:
     """Patient-level paired bootstrap of AUROC/ECE and gaps vs a reference method.
 
@@ -490,6 +491,14 @@ def _bootstrap_real_gaps(
       low-prevalence target centers. Set stratified=False for an ordinary
       (prevalence-varying) bootstrap. n_pos / n_neg are reported so the effective
       power of each transfer is visible.
+    * ``replicate_sink``: if a list is passed, the per-replicate gaps are appended
+      to it as one row per (replicate, method). The summary statistics below
+      collapse the joint distribution across methods, but a max-statistic test
+      needs that joint distribution: the same resample is shared by all methods,
+      so their gaps are correlated, and the null distribution of the *maximum*
+      cannot be reconstructed from per-method margins alone. Only bootstrap
+      indices that survive the single-class check are recorded, and every method
+      shares the same ``b`` index, which is what makes the rows pairable.
     """
     rng = np.random.default_rng(seed)
     y = np.asarray(y_tgt).astype(int)
@@ -532,6 +541,12 @@ def _bootstrap_real_gaps(
             boot[m]["ece"].append(ec)
             boot[m]["d_auroc"].append(au - ref_au)        # method - ref
             boot[m]["d_ece"].append(ref_ec - ec)          # ref - method
+            if replicate_sink is not None:
+                replicate_sink.append({
+                    "b": b, "method": m,
+                    "d_auroc": round(au - ref_au, 6),
+                    "d_ece": round(ref_ec - ec, 6),
+                })
 
     def _ci(v):
         v = np.asarray(v, dtype=float)
@@ -711,9 +726,11 @@ def _run_transfer(
     # Patient-level bootstrap: stack per-seed probabilities (target cohort is
     # fixed and identically ordered across seeds) and resample patients.
     boot_rows: list[dict] = []
+    boot_reps: list[dict] = []
     if y_tgt_ref is not None:
         prob_by_method = {m: np.vstack(P) for m, P in prob_accum.items() if P}
-        boot_rows = _bootstrap_real_gaps(prob_by_method, y_tgt_ref, reference="lr_erm")
+        boot_rows = _bootstrap_real_gaps(prob_by_method, y_tgt_ref, reference="lr_erm",
+                                         replicate_sink=boot_reps)
 
     # Covariate-shift diagnostic: how far apart are source/target features?
     diag_rows = _shift_diagnostic(src_df, tgt_df, feature_cols, label_col,
@@ -722,6 +739,8 @@ def _run_transfer(
     _TABLES.mkdir(parents=True, exist_ok=True)
     save_table_csv(all_rows, _TABLES / f"{out_prefix}_raw.csv")
     save_table_csv(agg,      _TABLES / f"{out_prefix}_summary.csv")
+    if boot_reps:
+        save_table_csv(boot_reps, _TABLES / f"{out_prefix}_bootreps.csv")
     if boot_rows:
         save_table_csv(boot_rows, _TABLES / f"{out_prefix}_bootstrap.csv")
     if diag_rows:
@@ -897,15 +916,18 @@ def run_i3lung_loco(
 
         agg = _aggregate_real(all_rows)
         boot: list[dict] = []
+        boot_reps: list[dict] = []
         if y_ref is not None:
             boot = _bootstrap_real_gaps(
                 {m: np.vstack(P) for m, P in prob_accum.items() if P},
-                y_ref, reference="lr_erm")
+                y_ref, reference="lr_erm", replicate_sink=boot_reps)
 
         _TABLES.mkdir(parents=True, exist_ok=True)
         pfx = f"{out_prefix}_{target}"
         save_table_csv(all_rows, _TABLES / f"{pfx}_raw.csv")
         save_table_csv(agg,      _TABLES / f"{pfx}_summary.csv")
+        if boot_reps:
+            save_table_csv(boot_reps, _TABLES / f"{pfx}_bootreps.csv")
         if boot:
             save_table_csv(boot, _TABLES / f"{pfx}_bootstrap.csv")
         if verbose:
