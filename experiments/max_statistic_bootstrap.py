@@ -51,6 +51,14 @@ ERM = "lr_erm"
 FIELDS = {"d_auroc": "discrimination (AUROC gap)",
           "d_ece": "calibration (ECE gain)"}
 
+# Prior adjustment and Platt/isotonic scaling are monotone transformations of the
+# ERM scores, so their AUROC gap is exactly zero by construction. Including them
+# in the discrimination test is not conservative, it is meaningless: a constant
+# zero has no sampling distribution, and it wins the max whenever every real
+# method is negative. They are compared on calibration only.
+RANK_PRESERVING = {"prior_recalib", "platt_scaling", "isotonic"}
+EXCLUDE = {"d_auroc": RANK_PRESERVING, "d_ece": set()}
+
 
 def load_bootreps(path: str) -> dict[str, dict[int, dict[str, float]]]:
     """method -> replicate index -> {d_auroc, d_ece}"""
@@ -96,7 +104,8 @@ def analyse(prefix: str) -> None:
 
         pooled: dict[str, dict[int, float]] = defaultdict(dict)
         for name, bm in sorted(per_transfer.items()):
-            methods = sorted(m for m in bm if m != ERM)
+            methods = sorted(m for m in bm
+                             if m != ERM and m not in EXCLUDE[field])
             if not methods:
                 continue
             common = set.intersection(*(set(bm[m]) for m in methods))
