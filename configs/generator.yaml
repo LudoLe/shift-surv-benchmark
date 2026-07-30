@@ -45,7 +45,13 @@ scenarios:
   covariate_shift:          # P(x) moves, P(y|u_inv) fixed; mu shifted _|_ w
     mu_inv_shift_scale: 1.5
     mu_spu_shift_scale: 1.5
-    sigma_noise_target: 0.8
+    sigma_noise_target: 0.5 # unchanged from source: the shift is case-mix, not
+                            # noise.  Raising sigma here would change P(x|u),
+                            # i.e. the measurement model, and the regime would
+                            # confound case-mix with measurement degradation --
+                            # which no adaptation method can undo, because the
+                            # information is destroyed rather than displaced.
+                            # The noise increase lives in observational_shift.
     source_mu_scale: 0.3    # sources get random mu ~ N(0,1)*0.3
     source_sigma_base: 0.5      # source noise std, before jitter
     source_sigma_jitter: 0.1    # sigma ~ U(base-jitter, base+jitter) per source

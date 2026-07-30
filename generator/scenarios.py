@@ -174,13 +174,14 @@ def _covariate_shift(
     seed: int,
     mu_inv_shift_scale: float = 1.5,
     mu_spu_shift_scale: float = 1.5,
-    sigma_noise_target: float = 0.8,
+    sigma_noise_target: float = 0.5,
     source_mu_scale: float = 0.3,
     source_sigma_base: float = 0.5,
     source_sigma_jitter: float = 0.1,
 ) -> tuple[list[DomainParams], DomainParams]:
     """
-    Pure covariate shift — only the latent means shift, A_inv unchanged.
+    Pure covariate shift — only the latent means shift; the observation model
+    (A_inv and the noise scale) and the outcome mechanism are unchanged.
 
     P(X) shifts rigidly (location shift in latent space), P(Y|u_inv) is
     identical across domains. Analogous to the two-moons problem: same
@@ -188,6 +189,19 @@ def _covariate_shift(
 
     mu_inv is shifted orthogonally to w so that mean(eta) is unchanged
     and prevalence is stable across source and target.
+
+    ``sigma_noise_target`` defaults to the source noise level, matching
+    ``_spurious_shift``. It previously defaulted to 0.8 against a source of
+    ~0.5, which raised the observation-noise variance by 2.6x on top of the
+    mean displacement. That made the regime a mixture of case-mix and
+    measurement shift, and the two are not interchangeable for this benchmark's
+    purpose: a mean displacement moves information around, so importance
+    weighting and feature alignment can in principle undo it, whereas added
+    observation noise destroys information that no unsupervised method can
+    recover. Attributing the resulting unrecovered gap to "covariate shift"
+    therefore admitted an alternative explanation the benchmark is meant to
+    rule out. The noise increase belongs to ``_observational_shift``, which
+    keeps sigma at 0.8 alongside the A_inv rotation.
     """
     rng = np.random.default_rng(seed + 10)
 
