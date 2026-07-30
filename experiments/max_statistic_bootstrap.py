@@ -14,6 +14,17 @@ correlation would make the test conservative in exactly the way we are trying to
 avoid. `run_real_data.py` therefore also writes `<prefix>_bootreps.csv` with one
 row per (replicate, method); this script consumes those.
 
+Since the switch to the per-seed bootstrap, a "replicate" is a
+(bootstrap resample, training seed) cell rather than a bootstrap resample
+alone, so `b` is a composite index and the file is n_boot * n_seeds rows per
+method. Nothing here changes: the test only needs each `b` to be shared by
+every method (it is -- the same patients and the same seed), and the gaps to
+be formed within a cell (they are). The cells are not mutually independent,
+since n_seeds of them share a patient resample; that affects how precisely the
+null quantile is estimated, not the validity of the comparison, because the
+statistic is standardised by the per-cell SD rather than by a standard error
+that would need an effective sample size.
+
 Test
 ----
 For method m with bootstrap gaps d[m,b]:

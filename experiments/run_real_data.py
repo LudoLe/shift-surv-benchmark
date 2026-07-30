@@ -595,12 +595,277 @@ def _bootstrap_real_gaps(
     return rows
 
 
+# ---------------------------------------------------------------------------
+# Per-seed patient-level bootstrap (total uncertainty: training + cohort)
+# ---------------------------------------------------------------------------
+
+def _fast_auroc(y: np.ndarray, p: np.ndarray) -> float:
+    """Mann-Whitney AUROC with tie-averaged ranks.
+
+    Numerically identical to ``utils.metrics.auroc`` (sklearn) but without the
+    per-call validation overhead, which matters because the per-seed bootstrap
+    evaluates it n_boot * n_seeds * n_methods times.
+    """
+    n_pos = int(y.sum())
+    n_neg = len(y) - n_pos
+    if n_pos == 0 or n_neg == 0:
+        return float("nan")
+    r = sp_stats.rankdata(p)
+    return float((r[y == 1].sum() - n_pos * (n_pos + 1) / 2.0) / (n_pos * n_neg))
+
+
+def _fast_ece(y: np.ndarray, p: np.ndarray, n_bins: int = 10) -> float:
+    """Equal-width-bin ECE, vectorised.
+
+    Algebraically identical to ``utils.metrics.ece``: that function computes
+    sum_b (n_b/n)*|mean(y_b) - mean(p_b)|, and since mean(.)=sum(.)/n_b the n_b
+    cancels, leaving sum_b |sum(y_b) - sum(p_b)| / n.
+
+    Binning must use the *same* edges, not floor(p*n_bins): the latter disagrees
+    on values that land on an edge, because the edge from linspace and the
+    product p*n_bins round differently (e.g. 0.3*10 = 3.0000000000000004 while
+    linspace(0,1,11)[3] = 0.30000000000000004, so 0.3 falls in bin 3 one way and
+    bin 2 the other). searchsorted against the linspace edges reproduces the
+    half-open [lo, hi) convention exactly, with the last bin closed at 1.0.
+    """
+    edges = np.linspace(0.0, 1.0, n_bins + 1)
+    b = np.clip(np.searchsorted(edges, p, side="right") - 1, 0, n_bins - 1)
+    sy = np.bincount(b, weights=y, minlength=n_bins)
+    sp = np.bincount(b, weights=p, minlength=n_bins)
+    return float(np.abs(sy - sp).sum() / len(y))
+
+
+def _bootstrap_real_gaps_per_seed(
+    prob_by_method: dict[str, np.ndarray],
+    y_tgt: np.ndarray,
+    reference: str = "lr_erm",
+    n_boot: int = 2000,
+    seed: int = 0,
+    n_bins: int = 10,
+    stratified: bool = True,
+    replicate_sink: list | None = None,
+    seed_summary_sink: list | None = None,
+) -> list[dict]:
+    """Patient-level bootstrap run *separately for every training seed*.
+
+    Why this exists (and why it replaces the ensemble version as the headline)
+    ------------------------------------------------------------------------
+    The synthetic benchmark regenerates source and target from the generator at
+    every seed, so its 10-seed spread contains two sources of variability at
+    once: the training run (split, initialisation, HP selection) and the finite
+    sample drawn from the population. On real data the cohort is fixed, so the
+    two have to be reintroduced separately, and the previous two analyses each
+    captured only one of them:
+
+    * ``_aggregate_real`` -- t-CI across seeds. Cohort fixed, so it answers
+      "how much does the result move if I retrain?", not "would it hold on the
+      next 430 patients?".
+    * ``_bootstrap_real_gaps`` -- averages the seeds into one ensemble
+      probability per patient, then resamples patients. This *deliberately*
+      removes training variability, and it also changes the estimand: a
+      10-member ensemble of logistic regressions is a lower-variance predictor
+      than the single model whose mean performance the seed table reports, so
+      its AUROC is not the number in the summary table.
+
+    This function keeps the seed axis. For every bootstrap replicate ``b`` and
+    every seed ``s`` it evaluates all methods on the resampled patients using
+    seed ``s``'s own predictions, and pools the resulting (b, s) values. The
+    pooled spread therefore carries cohort sampling *and* training variability,
+    which is the quantity that is comparable to the synthetic 10-seed interval.
+
+    The point estimate is the across-seed mean of the observed (un-resampled)
+    metric, so it now agrees with ``tgt_auroc_mean`` in the seed summary table.
+
+    Pairing
+    -------
+    The same patient indices are used for every method *and* every seed, so
+    method-vs-reference gaps are formed within a single (b, s) cell before any
+    pooling. That preserves the positive correlation between methods, which the
+    max-statistic test depends on.
+
+    Variance decomposition
+    ----------------------
+    Each row reports, for AUROC and for the AUROC gap:
+      * ``*_sd_within``  -- mean over seeds of the SD across replicates
+                            (cohort sampling at fixed training run)
+      * ``*_sd_between`` -- SD over seeds of the per-seed mean
+                            (training variability at fixed cohort)
+    If ``sd_between`` is small relative to ``sd_within``, the ensemble shortcut
+    was harmless and the old numbers stand; if it is not, it was hiding real
+    variability. Either way the paper can state which dominates instead of
+    assuming.
+
+    ``replicate_sink`` keeps the flat (replicate, method) schema that
+    ``max_statistic_bootstrap.py`` consumes: ``b`` is a composite index over
+    (bootstrap replicate, seed) cells, and ``boot_b`` / ``seed_idx`` are added
+    for transparency. Every method shares each composite index, which is what
+    makes the rows pairable.
+    """
+    rng = np.random.default_rng(seed)
+    y = np.asarray(y_tgt).astype(int)
+    n = len(y)
+
+    P = {m: np.atleast_2d(np.asarray(v, dtype=float))
+         for m, v in prob_by_method.items() if v is not None and np.size(v) > 0}
+    if reference not in P:
+        return []
+    n_seeds = P[reference].shape[0]
+    if any(v.shape != (n_seeds, n) for v in P.values()):
+        raise ValueError(
+            "per-seed bootstrap needs every method to have the same "
+            f"(n_seeds, n_tgt) = ({n_seeds}, {n}) probability matrix; got "
+            + ", ".join(f"{m}:{v.shape}" for m, v in P.items())
+        )
+
+    pos_idx = np.where(y == 1)[0]
+    neg_idx = np.where(y == 0)[0]
+    n_pos, n_neg = len(pos_idx), len(neg_idx)
+
+    if stratified and n_pos > 0 and n_neg > 0:
+        pos_boot = pos_idx[rng.integers(0, n_pos, size=(n_boot, n_pos))]
+        neg_boot = neg_idx[rng.integers(0, n_neg, size=(n_boot, n_neg))]
+        idx = np.concatenate([pos_boot, neg_boot], axis=1)
+    else:
+        idx = rng.integers(0, n, size=(n_boot, n))
+
+    methods = list(P.keys())
+    # (n_seeds, n_boot) per method, so the seed axis survives to the summary.
+    au = {m: np.full((n_seeds, n_boot), np.nan) for m in methods}
+    ec = {m: np.full((n_seeds, n_boot), np.nan) for m in methods}
+    d_au = {m: np.full((n_seeds, n_boot), np.nan) for m in methods}
+    d_ec = {m: np.full((n_seeds, n_boot), np.nan) for m in methods}
+
+    rep_id = 0
+    for b in range(n_boot):
+        ib = idx[b]
+        yb = y[ib]
+        if len(np.unique(yb)) < 2:
+            continue
+        for s in range(n_seeds):
+            ref_au = _fast_auroc(yb, P[reference][s][ib])
+            ref_ec = _fast_ece(yb, P[reference][s][ib], n_bins=n_bins)
+            for m in methods:
+                pb = P[m][s][ib]
+                a = _fast_auroc(yb, pb)
+                e = _fast_ece(yb, pb, n_bins=n_bins)
+                au[m][s, b] = a
+                ec[m][s, b] = e
+                d_au[m][s, b] = a - ref_au        # method - ref
+                d_ec[m][s, b] = ref_ec - e        # ref - method
+                if replicate_sink is not None:
+                    replicate_sink.append({
+                        "b": rep_id, "boot_b": b, "seed_idx": s, "method": m,
+                        "d_auroc": round(a - ref_au, 6),
+                        "d_ece": round(ref_ec - e, 6),
+                    })
+            rep_id += 1
+
+    def _pooled(M):
+        v = np.asarray(M, dtype=float).ravel()
+        return v[~np.isnan(v)]
+
+    def _ci(v):
+        return (float(np.percentile(v, 2.5)), float(np.percentile(v, 97.5))) \
+            if len(v) else (float("nan"), float("nan"))
+
+    def _p_two_sided(v):
+        if len(v) == 0:
+            return float("nan")
+        return float(min(1.0, 2.0 * min(float(np.mean(v >= 0)), float(np.mean(v <= 0)))))
+
+    def _decomp(M):
+        """(sd_within, sd_between) over the (n_seeds, n_boot) grid."""
+        M = np.asarray(M, dtype=float)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            per_seed_sd = np.nanstd(M, axis=1, ddof=1)
+            per_seed_mean = np.nanmean(M, axis=1)
+            within = float(np.nanmean(per_seed_sd))
+            between = float(np.nanstd(per_seed_mean, ddof=1)) if M.shape[0] > 1 else 0.0
+        return within, between
+
+    # Observed (un-resampled) per-seed metrics: the point estimates.
+    obs_au = {m: np.array([_fast_auroc(y, P[m][s]) for s in range(n_seeds)]) for m in methods}
+    obs_ec = {m: np.array([_fast_ece(y, P[m][s], n_bins=n_bins) for s in range(n_seeds)])
+              for m in methods}
+
+    if seed_summary_sink is not None:
+        for m in methods:
+            for s in range(n_seeds):
+                seed_summary_sink.append({
+                    "method": m, "seed_idx": s,
+                    "auroc_obs": round(float(obs_au[m][s]), 4),
+                    "ece_obs": round(float(obs_ec[m][s]), 4),
+                    "auroc_boot_mean": round(float(np.nanmean(au[m][s])), 4),
+                    "auroc_boot_sd": round(float(np.nanstd(au[m][s], ddof=1)), 4),
+                    "auroc_gap_boot_mean": round(float(np.nanmean(d_au[m][s])), 4),
+                    "ece_gap_boot_mean": round(float(np.nanmean(d_ec[m][s])), 4),
+                })
+
+    rows = []
+    for m in methods:
+        pau, pec = _pooled(au[m]), _pooled(ec[m])
+        pdau, pdec = _pooled(d_au[m]), _pooled(d_ec[m])
+        au_lo, au_hi = _ci(pau)
+        ec_lo, ec_hi = _ci(pec)
+        dau_lo, dau_hi = _ci(pdau)
+        dec_lo, dec_hi = _ci(pdec)
+        au_w, au_b = _decomp(au[m])
+        dau_w, dau_b = _decomp(d_au[m])
+        rows.append({
+            "method":            m,
+            # Point estimates: across-seed mean of the observed metric, so these
+            # match tgt_auroc_mean / tgt_ece_mean in the seed summary table.
+            "auroc":             round(float(np.nanmean(obs_au[m])), 4),
+            "auroc_lo":          round(au_lo, 4),
+            "auroc_hi":          round(au_hi, 4),
+            "ece":               round(float(np.nanmean(obs_ec[m])), 4),
+            "ece_lo":            round(ec_lo, 4),
+            "ece_hi":            round(ec_hi, 4),
+            "auroc_gap_vs_ref":  round(float(np.nanmean(pdau)), 4),
+            "auroc_gap_lo":      round(dau_lo, 4),
+            "auroc_gap_hi":      round(dau_hi, 4),
+            "auroc_gap_p":       round(_p_two_sided(pdau), 4),
+            "ece_gap_vs_ref":    round(float(np.nanmean(pdec)), 4),
+            "ece_gap_lo":        round(dec_lo, 4),
+            "ece_gap_hi":        round(dec_hi, 4),
+            "ece_gap_p":         round(_p_two_sided(pdec), 4),
+            # Variance decomposition: which axis dominates.
+            "auroc_sd_within":     round(au_w, 4),
+            "auroc_sd_between":    round(au_b, 4),
+            "auroc_gap_sd_within": round(dau_w, 4),
+            "auroc_gap_sd_between": round(dau_b, 4),
+            "reference":         reference,
+            "n_boot":            n_boot,
+            "n_seeds":           n_seeds,
+            "n_cells":           int(len(pdau)),
+            "n_tgt":             n,
+            "n_pos":             int(n_pos),
+            "n_neg":             int(n_neg),
+            "stratified":        bool(stratified),
+            "uncertainty":       "cohort+training",
+        })
+    return rows
+
+
 def _print_bootstrap(rows: list[dict], source: str, target: str) -> None:
     if not rows:
         return
-    ref = rows[0]["reference"]
-    print(f"\n  PATIENT-LEVEL BOOTSTRAP — {source} → {target}  "
-          f"(n_boot={rows[0]['n_boot']}, gaps vs {ref}, 95% percentile CI)")
+    r0 = rows[0]
+    ref = r0["reference"]
+    per_seed = "n_seeds" in r0
+    if per_seed:
+        head = (f"\n  PER-SEED PATIENT-LEVEL BOOTSTRAP — {source} → {target}  "
+                f"(n_boot={r0['n_boot']} × {r0['n_seeds']} seeds = {r0['n_cells']} cells, "
+                f"gaps vs {ref}, 95% percentile CI)")
+        note = ("    uncertainty = target-cohort sampling + training variability "
+                "(comparable to the synthetic 10-seed interval)")
+    else:
+        head = (f"\n  PATIENT-LEVEL BOOTSTRAP (seed-ensemble) — {source} → {target}  "
+                f"(n_boot={r0['n_boot']}, gaps vs {ref}, 95% percentile CI)")
+        note = "    uncertainty = target-cohort sampling only, seeds averaged out"
+    print(head)
+    print(note)
     print(f"  {'method':16s}{'AUROC [95% CI]':26s}{'ΔAUROC vs ref (p)':26s}{'ECE [95% CI]':24s}{'ΔECE vs ref (p)':22s}")
     for r in rows:
         au  = f"{r['auroc']:.3f} [{r['auroc_lo']:.3f},{r['auroc_hi']:.3f}]"
@@ -608,6 +873,18 @@ def _print_bootstrap(rows: list[dict], source: str, target: str) -> None:
         ec  = f"{r['ece']:.3f} [{r['ece_lo']:.3f},{r['ece_hi']:.3f}]"
         dec = f"{r['ece_gap_vs_ref']:+.3f} p={r['ece_gap_p']:.3f}"
         print(f"  {r['method']:16s}{au:26s}{dau:26s}{ec:24s}{dec:22s}")
+
+    if per_seed:
+        print(f"\n  VARIANCE DECOMPOSITION (SD of the AUROC gap vs {ref})")
+        print(f"  {'method':16s}{'within-seed (cohort)':>22s}{'between-seed (training)':>26s}{'ratio':>10s}")
+        for r in rows:
+            if r["method"] == ref:
+                continue
+            w, b = r["auroc_gap_sd_within"], r["auroc_gap_sd_between"]
+            ratio = f"{b / w:.2f}" if w > 1e-9 else "n/a"
+            print(f"  {r['method']:16s}{w:>22.4f}{b:>26.4f}{ratio:>10s}")
+        print("    ratio > 1 means retraining moves the gap more than resampling patients;")
+        print("    the seed-ensemble bootstrap discards exactly the between-seed part.")
 
 
 # ---------------------------------------------------------------------------
@@ -725,12 +1002,25 @@ def _run_transfer(
 
     # Patient-level bootstrap: stack per-seed probabilities (target cohort is
     # fixed and identically ordered across seeds) and resample patients.
+    #
+    # Headline analysis is the per-seed bootstrap: it keeps the seed axis, so
+    # the reported interval carries cohort sampling AND training variability
+    # together, which is what makes it comparable to the synthetic 10-seed
+    # interval. The ensemble version is still computed and saved alongside so
+    # the two can be diffed -- it answers a different question (an ensemble
+    # predictor's cohort uncertainty) and its AUROC is not the seed-mean AUROC.
     boot_rows: list[dict] = []
     boot_reps: list[dict] = []
+    boot_by_seed: list[dict] = []
+    boot_ens_rows: list[dict] = []
     if y_tgt_ref is not None:
         prob_by_method = {m: np.vstack(P) for m, P in prob_accum.items() if P}
-        boot_rows = _bootstrap_real_gaps(prob_by_method, y_tgt_ref, reference="lr_erm",
-                                         replicate_sink=boot_reps)
+        boot_rows = _bootstrap_real_gaps_per_seed(
+            prob_by_method, y_tgt_ref, reference="lr_erm",
+            replicate_sink=boot_reps, seed_summary_sink=boot_by_seed,
+        )
+        boot_ens_rows = _bootstrap_real_gaps(prob_by_method, y_tgt_ref,
+                                             reference="lr_erm")
 
     # Covariate-shift diagnostic: how far apart are source/target features?
     diag_rows = _shift_diagnostic(src_df, tgt_df, feature_cols, label_col,
@@ -743,6 +1033,10 @@ def _run_transfer(
         save_table_csv(boot_reps, _TABLES / f"{out_prefix}_bootreps.csv")
     if boot_rows:
         save_table_csv(boot_rows, _TABLES / f"{out_prefix}_bootstrap.csv")
+    if boot_by_seed:
+        save_table_csv(boot_by_seed, _TABLES / f"{out_prefix}_bootstrap_byseed.csv")
+    if boot_ens_rows:
+        save_table_csv(boot_ens_rows, _TABLES / f"{out_prefix}_bootstrap_ensemble.csv")
     if diag_rows:
         save_table_csv(diag_rows, _TABLES / f"{out_prefix}_shiftdiag.csv")
 
@@ -761,7 +1055,9 @@ def _run_transfer(
         if diag_rows:
             print(f"  Saved: {_TABLES}/{out_prefix}_shiftdiag.csv")
 
-    return {"raw": all_rows, "aggregated": agg, "bootstrap": boot_rows, "shiftdiag": diag_rows}
+    return {"raw": all_rows, "aggregated": agg, "bootstrap": boot_rows,
+            "bootstrap_byseed": boot_by_seed, "bootstrap_ensemble": boot_ens_rows,
+            "shiftdiag": diag_rows}
 
 
 def run_real_data(
