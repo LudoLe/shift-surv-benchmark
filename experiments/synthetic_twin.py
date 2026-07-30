@@ -24,7 +24,10 @@ the residual is evidence that something unmeasured is doing the work -- which is
 also worth reporting.
 
 Both the real transfer and its twin are evaluated with the same method set and
-the same patient-level bootstrap, so the comparison is like for like.
+the same per-seed patient-level bootstrap, so the comparison is like for like:
+one cohort held fixed, n_seeds training runs on it, patients resampled with
+replacement, and the (replicate, seed) cells pooled. Keep --n_seeds equal to
+the real transfer's or the two intervals stop being comparable.
 
 Usage
 -----
@@ -50,7 +53,6 @@ if str(_ROOT) not in sys.path:
 
 import numpy as np
 from sklearn.impute import SimpleImputer
-from sklearn.metrics import roc_auc_score
 from sklearn.preprocessing import StandardScaler
 
 from generator.base_generator import DomainDataset
@@ -58,7 +60,6 @@ from generator.parameters import BaseParams
 from generator.scenarios import generate_scenario
 from utils.io import save_table_csv
 from utils.shift_diag import rbf_mmd
-from utils.metrics import ece
 
 _TABLES = _ROOT / "outputs" / "tables"
 ERM_KEY = "all_observed"
@@ -187,21 +188,71 @@ def run_methods(S, T, seed=0):
 
 
 def bootstrap_gaps(probs, y, n_boot=2000, seed=0):
-    """Patient-level stratified bootstrap of each method's gap vs ERM."""
+    """Per-seed patient-level stratified bootstrap of each method's gap vs ERM.
+
+    ``probs[m]`` is an (n_seeds, n_tgt) array: one row per training seed, all
+    rows evaluated on the same fixed twin cohort.
+
+    Why per-seed, and why the cohort is fixed
+    -----------------------------------------
+    This has to be the *same estimator* the real transfer uses, or the
+    twin-vs-real comparison stops being like for like -- which is the whole
+    point of the twin. On the real side the cohort cannot be redrawn, so the
+    interval is built by varying the training seed and resampling patients with
+    replacement. The twin therefore does exactly that too: one cohort, drawn
+    once, then n_seeds training runs and a shared patient bootstrap over both.
+
+    It would be tempting to regenerate the twin cohort at every seed, since
+    unlike the real data we can. That would be wrong here: the twin's interval
+    would then carry genuine cohort resampling while the real one carries the
+    bootstrap approximation of it, and the two would differ for a reason that
+    has nothing to do with the transfer being modelled.
+
+    The (b, s) cells are pooled into a single gap distribution per method, so
+    the returned D matrices are (n_methods, n_seeds * n_boot) and ``max_stat``
+    consumes them unchanged. Gaps are formed inside a cell -- same patients,
+    same seed -- so methods stay paired.
+
+    ``_fast_auroc`` / ``_fast_ece`` are imported from ``run_real_data`` rather
+    than reimplemented, so the metric definitions and the stratified index
+    scheme are literally shared with the real-data path.
+    """
+    from experiments.run_real_data import _fast_auroc, _fast_ece
+
     methods = [m for m in probs if m not in (ERM_KEY, ORACLE_KEY)]
+    P = {m: np.atleast_2d(np.asarray(v, dtype=float)) for m, v in probs.items()}
+    n_seeds = P[ERM_KEY].shape[0]
+    y = np.asarray(y).astype(int)
+
     rng = np.random.default_rng(seed)
     pos, neg = np.where(y == 1)[0], np.where(y == 0)[0]
-    D_auc = np.zeros((len(methods), n_boot))
-    D_ece = np.zeros((len(methods), n_boot))
-    for b in range(n_boot):
-        idx = np.r_[rng.choice(pos, len(pos), True), rng.choice(neg, len(neg), True)]
+
+    # Indices shared by every method AND every seed, so the pairing holds at
+    # both levels.
+    idx_all = [np.r_[rng.choice(pos, len(pos), True), rng.choice(neg, len(neg), True)]
+               for _ in range(n_boot)]
+
+    n_cells = n_boot * n_seeds
+    D_auc = np.full((len(methods), n_cells), np.nan)
+    D_ece = np.full((len(methods), n_cells), np.nan)
+
+    c = 0
+    for idx in idx_all:
         yb = y[idx]
-        ref_a = roc_auc_score(yb, probs[ERM_KEY][idx])
-        ref_e = ece(yb, probs[ERM_KEY][idx])
-        for i, m in enumerate(methods):
-            D_auc[i, b] = roc_auc_score(yb, probs[m][idx]) - ref_a
-            D_ece[i, b] = ref_e - ece(yb, probs[m][idx])
-    return methods, D_auc, D_ece
+        if len(np.unique(yb)) < 2:
+            c += n_seeds
+            continue
+        for s in range(n_seeds):
+            ref_a = _fast_auroc(yb, P[ERM_KEY][s][idx])
+            ref_e = _fast_ece(yb, P[ERM_KEY][s][idx])
+            for i, m in enumerate(methods):
+                pb = P[m][s][idx]
+                D_auc[i, c] = _fast_auroc(yb, pb) - ref_a
+                D_ece[i, c] = ref_e - _fast_ece(yb, pb)
+            c += 1
+
+    keep = ~np.isnan(D_auc[0]) if len(methods) else np.zeros(n_cells, bool)
+    return methods, D_auc[:, keep], D_ece[:, keep]
 
 
 def max_stat(D, names):
@@ -234,6 +285,10 @@ def main() -> None:
     ap.add_argument("--tau", type=float, default=None)
     ap.add_argument("--n_boot", type=int, default=2000)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--n_seeds", type=int, default=10,
+                    help="training seeds on the fixed twin cohort; must match "
+                         "the real transfer's --n_seeds for the comparison to "
+                         "be like for like")
     args = ap.parse_args()
 
     src_df, tgt_df, feats, label = load_real(args)
@@ -252,22 +307,47 @@ def main() -> None:
     print(f"  scala covariate shift {scale:.3f}  ->  MMD gemello {got:.4f} "
           f"(bersaglio {spec['mmd']:.4f})")
 
+    # One twin cohort, held fixed across seeds -- see bootstrap_gaps for why.
     S, T = build_twin(spec, scale, args.seed)
     print(f"  prevalenze gemello: {S.y.mean():.3f} / {T.y.mean():.3f}\n")
 
-    print("  metodi sul gemello:")
-    probs = run_methods(S, T, seed=args.seed)
-    if ERM_KEY not in probs:
+    print(f"  metodi sul gemello ({args.n_seeds} seed, coorte fissa):")
+    per_seed = []
+    for s in range(args.seed, args.seed + args.n_seeds):
+        print(f"    [seed {s}]", flush=True)
+        per_seed.append(run_methods(S, T, seed=s))
+
+    # Keep only methods that every seed produced, so the probability matrices
+    # are rectangular and the (b, s) cells stay comparable across methods.
+    common = set(per_seed[0])
+    for p in per_seed[1:]:
+        common &= set(p)
+    dropped = (set(per_seed[0]) | set().union(*(set(p) for p in per_seed))) - common
+    if dropped:
+        print(f"    ! metodi scartati (non prodotti da tutti i seed): {sorted(dropped)}")
+    if ERM_KEY not in common:
         raise SystemExit("ERM non disponibile, impossibile calcolare i gap")
+
+    probs = {m: np.vstack([p[m] for p in per_seed]) for m in common}
     names, D_auc, D_ece = bootstrap_gaps(probs, T.y, args.n_boot, args.seed)
 
     rows = []
-    print(f"\n  {'metodo':<18}{'gap AUROC':>12}{'gap ECE':>12}")
+    print(f"\n  {'metodo':<18}{'gap AUROC [95% CI]':>30}{'gap ECE [95% CI]':>30}")
     for i, m in enumerate(names):
-        print(f"  {m:<18}{D_auc[i].mean():>+12.4f}{D_ece[i].mean():>+12.4f}")
+        a_lo, a_hi = np.percentile(D_auc[i], [2.5, 97.5])
+        e_lo, e_hi = np.percentile(D_ece[i], [2.5, 97.5])
+        print(f"  {m:<18}"
+              f"{f'{D_auc[i].mean():+.4f} [{a_lo:+.4f},{a_hi:+.4f}]':>30}"
+              f"{f'{D_ece[i].mean():+.4f} [{e_lo:+.4f},{e_hi:+.4f}]':>30}")
         rows.append(dict(transfer=tag, method=m,
                          twin_auroc_gap=round(float(D_auc[i].mean()), 5),
+                         twin_auroc_gap_lo=round(float(a_lo), 5),
+                         twin_auroc_gap_hi=round(float(a_hi), 5),
                          twin_ece_gap=round(float(D_ece[i].mean()), 5),
+                         twin_ece_gap_lo=round(float(e_lo), 5),
+                         twin_ece_gap_hi=round(float(e_hi), 5),
+                         n_seeds=args.n_seeds, n_boot=args.n_boot,
+                         n_cells=int(D_auc.shape[1]),
                          **{k: round(v, 4) if isinstance(v, float) else v
                             for k, v in spec.items()}))
     for lbl, D, drop in (("AUROC", D_auc, RANK_PRESERVING), ("ECE", D_ece, set())):
