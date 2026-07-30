@@ -31,6 +31,13 @@ N_SEEDS="${3:-10}"
 (( JOBS < 1 )) && JOBS=1
 (( JOBS > 10 )) && JOBS=10
 
+# Resolve the I3LUNG dir against the *caller's* cwd before cd'ing to the repo
+# root, so a relative path like "I3LUNG_DATA" works from wherever it was typed.
+if [[ -n "$I3DIR" ]]; then
+  I3DIR="$(cd "$I3DIR" 2>/dev/null && pwd)" || {
+    echo "ERROR: I3LUNG dir '${1}' does not exist (from $(pwd))." >&2; exit 1; }
+fi
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 mkdir -p outputs/logs outputs/tables
