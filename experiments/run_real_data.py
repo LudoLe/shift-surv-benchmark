@@ -42,6 +42,7 @@ from sklearn.preprocessing import StandardScaler
 from utils.metrics import auroc, auprc, ece, f1, sensitivity, specificity, prevalence
 from utils.io import save_table_csv
 from utils.shift_diag import rbf_mmd, rbf_mmd_permutation
+from utils.calibration import fit_platt
 
 import matplotlib
 matplotlib.use("Agg")
@@ -312,17 +313,13 @@ def _run_seed(
     })
 
     # --- Platt scaling (sigmoid calibration) ---
-    # 1-D logistic regression on the raw probabilities, fitted on source val.
-    # Identical to experiments.baselines._fit_posthoc_calib (scale + bias), so
-    # the synthetic and real-data Platt baselines are the same method.  The bias
-    # term is essential: temperature-only scaling cannot correct a prior/offset
-    # shift between source and target.
+    # Shared with experiments.baselines._fit_posthoc_calib via utils.calibration,
+    # so the synthetic and real-data Platt baselines are the same method by
+    # construction rather than by a comment. See fit_platt for why the fitted
+    # map is checked for monotonicity.
     p_val_raw = lr.predict_proba(X_val_s)[:, 1]
     p_tgt_raw = lr.predict_proba(X_tgt_s)[:, 1]
-    platt = LogisticRegression(C=1e6, solver="lbfgs", max_iter=1000, random_state=0)
-    platt.fit(p_val_raw.reshape(-1, 1), y_val)
-    p_val_platt = platt.predict_proba(p_val_raw.reshape(-1, 1))[:, 1]
-    p_tgt_platt = platt.predict_proba(p_tgt_raw.reshape(-1, 1))[:, 1]
+    p_val_platt, p_tgt_platt, _, _ = fit_platt(p_val_raw, y_val, p_tgt_raw)
     results.append({
         "method": "platt_scaling",
         "source_pooled": _score(y_val, p_val_platt),
@@ -1211,12 +1208,18 @@ def run_i3lung_loco(
                     prob_accum.setdefault(r["method"], []).append(np.asarray(probs))
 
         agg = _aggregate_real(all_rows)
+        # Same headline/comparison pair as _run_transfer: the per-seed bootstrap
+        # is the reported one, the seed-ensemble kept alongside for diffing.
         boot: list[dict] = []
         boot_reps: list[dict] = []
+        boot_by_seed: list[dict] = []
+        boot_ens: list[dict] = []
         if y_ref is not None:
-            boot = _bootstrap_real_gaps(
-                {m: np.vstack(P) for m, P in prob_accum.items() if P},
-                y_ref, reference="lr_erm", replicate_sink=boot_reps)
+            prob_by_method = {m: np.vstack(P) for m, P in prob_accum.items() if P}
+            boot = _bootstrap_real_gaps_per_seed(
+                prob_by_method, y_ref, reference="lr_erm",
+                replicate_sink=boot_reps, seed_summary_sink=boot_by_seed)
+            boot_ens = _bootstrap_real_gaps(prob_by_method, y_ref, reference="lr_erm")
 
         _TABLES.mkdir(parents=True, exist_ok=True)
         pfx = f"{out_prefix}_{target}"
@@ -1226,10 +1229,15 @@ def run_i3lung_loco(
             save_table_csv(boot_reps, _TABLES / f"{pfx}_bootreps.csv")
         if boot:
             save_table_csv(boot, _TABLES / f"{pfx}_bootstrap.csv")
+        if boot_by_seed:
+            save_table_csv(boot_by_seed, _TABLES / f"{pfx}_bootstrap_byseed.csv")
+        if boot_ens:
+            save_table_csv(boot_ens, _TABLES / f"{pfx}_bootstrap_ensemble.csv")
         if verbose:
             _print_real_results(agg, len(seeds), f"{len(names)-1}-source pool", target)
             _print_bootstrap(boot, "pooled-sources", target)
-            print(f"  Saved: {_TABLES}/{pfx}_{{raw,summary,bootstrap}}.csv")
+            print(f"  Saved: {_TABLES}/{pfx}_{{raw,summary,bootstrap,"
+                  f"bootstrap_byseed,bootstrap_ensemble}}.csv")
 
 
 # ---------------------------------------------------------------------------

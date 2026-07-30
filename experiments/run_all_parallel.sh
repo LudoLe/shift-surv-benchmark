@@ -108,8 +108,12 @@ echo
 echo "=== $(date +%F\ %T) — done"
 for entry in "${jobs_list[@]}"; do
   prefix="${entry%%|*}"
-  if [[ -s "outputs/tables/${prefix}_bootstrap.csv" ]]; then
-    echo "  OK    $prefix"
+  # LOCO writes one table per held-out centre (<prefix>_<CENTRE>_bootstrap.csv),
+  # never a bare <prefix>_bootstrap.csv, so match the glob rather than the exact
+  # name -- otherwise a completed LOCO run is reported as FAIL.
+  n_out=$(ls -1 "outputs/tables/${prefix}"*_bootstrap.csv 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$n_out" -gt 0 ]; then
+    echo "  OK    $prefix   ($n_out table(s))"
   else
     echo "  FAIL  $prefix   (see outputs/logs/${prefix}.log)"
   fi

@@ -330,12 +330,11 @@ def _fit_posthoc_calib(
     p_tgt_raw = base_lr.predict_proba(X_tgt_s)[:, 1]
 
     if calib_method == "sigmoid":
-        # Platt scaling: 1-D logistic regression on raw probabilities
-        platt = LogisticRegression(C=1e6, solver="lbfgs", max_iter=1000, random_state=0)
-        platt.fit(p_val_raw.reshape(-1, 1), y_val)
-        p_val_c = platt.predict_proba(p_val_raw.reshape(-1, 1))[:, 1]
-        p_tgt_c = platt.predict_proba(p_tgt_raw.reshape(-1, 1))[:, 1]
-        calibrator = platt
+        # Platt scaling: 1-D logistic regression on raw probabilities. Shared
+        # with run_real_data via utils.calibration, which also guards against a
+        # non-increasing fit reversing the ranking instead of calibrating it.
+        from utils.calibration import fit_platt
+        p_val_c, p_tgt_c, calibrator, _ = fit_platt(p_val_raw, y_val, p_tgt_raw)
         feature_set = "platt_scaling"
     else:
         iso = IsotonicRegression(out_of_bounds="clip")
