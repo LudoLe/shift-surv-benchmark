@@ -85,13 +85,13 @@ def draw_panel(ax, panel_key: str) -> None:
     cfg = PANELS[panel_key]
     summary = load_summary(cfg["prefix"])
     raw = load_raw(cfg["prefix"], field="tgt_ece")
-    stars = load_stars(cfg["prefix"])
+    stars = load_stars(cfg["prefix"], metric="ece")
 
     prior_prefix = PRIOR_PREFIX[panel_key]
     if os.path.exists(os.path.join(TABLES, f"{prior_prefix}_summary.csv")):
         summary.update(load_summary(prior_prefix))
         raw.update(load_raw(prior_prefix, field="tgt_ece"))
-        stars.update(load_stars(prior_prefix))
+        stars.update(load_stars(prior_prefix, metric="ece"))
     else:
         print(f"  ATTENZIONE: manca {prior_prefix}_summary.csv — "
               f"il pannello {panel_key} esce senza il regime label-prior")

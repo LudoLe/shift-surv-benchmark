@@ -119,14 +119,22 @@ def load_raw(prefix: str, field: str = "tgt_auroc") -> dict:
     return out
 
 
-def load_stars(prefix: str) -> dict:
-    """(scenario) -> star string, from the max-statistic test if it was run."""
+def load_stars(prefix: str, metric: str = "auroc") -> dict:
+    """(scenario) -> star string, from the max-statistic test if it was run.
+
+    Filtering on `metric` is not optional: the CSV holds both the AUROC and the
+    ECE test, and without it whichever row came last would win -- this figure
+    would be starred from the calibration test and fig_cal from the
+    discrimination one.
+    """
     path = os.path.join(TABLES, f"{prefix}_maxstat.csv")
     out = {}
     if not os.path.exists(path):
         return out
     with open(path) as fh:
         for r in csv.DictReader(fh):
+            if r.get("metric", metric) != metric:
+                continue
             try:
                 p = float(r["p_value"])
             except (KeyError, ValueError):

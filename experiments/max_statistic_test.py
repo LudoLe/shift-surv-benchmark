@@ -105,7 +105,13 @@ def max_stat_test(diffs: dict[str, np.ndarray]):
                 n_perm=len(signs))
 
 
-def run(metric_field: str, better: str, methods: list[str], title: str, data: dict):
+def run(metric_field: str, better: str, methods: list[str], title: str, data: dict,
+        metric_name: str = "") -> list[dict]:
+    """Print the table and return one row per regime, so the result can be
+    written to disk. Previously this only printed: the figures could not read
+    the significance and the stars had to be typed into the .tex by hand, which
+    is a claim no re-run can invalidate."""
+    rows: list[dict] = []
     print(f"\n{'='*76}\n{title}\n{'='*76}")
     print(f"{'regime':<17}{'best':>15}{'mean gap':>11}{'max-stat p':>12}{'Bonf. p':>10}")
     for scen in ["covariate_shift", "observational_shift", "spurious_shift",
@@ -120,17 +126,29 @@ def run(metric_field: str, better: str, methods: list[str], title: str, data: di
         if not diffs:
             continue
         r = max_stat_test(diffs)
+        rows.append({
+            "scenario": scen, "metric": metric_name, "best": r["best"],
+            "mean_gap": round(r["mean_gap"], 5),
+            # The figure generators read `p_value`; keeping the max-statistic
+            # one under that name means a figure can never be starred from the
+            # per-method Bonferroni p, which would ignore the post-hoc selection.
+            "p_value": round(r["p_maxstat"], 5),
+            "p_bonferroni": round(r["p_bonferroni"], 5),
+            "n_methods": r["n_methods"], "n_perm": r["n_perm"],
+        })
         star = "*" if r["p_maxstat"] < 0.05 else " "
         print(f"{SCEN_LABEL.get(scen, scen):<17}{r['best']:>15}"
               f"{r['mean_gap']:>+11.4f}{r['p_maxstat']:>11.4f}{star}{r['p_bonferroni']:>10.4f}")
     print(f"\n  exact enumeration of 2^10 = 1024 sign patterns; "
           f"'*' marks max-statistic p < 0.05")
+    return rows
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--raw", default=os.path.join(REPO_TABLES, "benchmark_1s1t_iwcv_raw.csv"))
     ap.add_argument("--prior_raw", default=os.path.join(PRIOR_TABLES, "benchmark_1s1t_prior_raw.csv"))
+    ap.add_argument("--out", default=None, help="CSV di output (default: <prefix>_maxstat.csv)")
     args = ap.parse_args()
 
     data = load_raw(args.raw)
@@ -139,10 +157,22 @@ def main() -> None:
     else:
         print(f"note: {args.prior_raw} not found -> label-prior omitted")
 
-    run("tgt_auroc", "high", ADAPT,
-        "DISCRIMINATION  --  best adaptation method vs ERM (target AUROC)", data)
-    run("tgt_ece", "low", RECAL + ADAPT,
-        "CALIBRATION  --  best method vs ERM (target ECE, lower is better)", data)
+    rows = run("tgt_auroc", "high", ADAPT,
+               "DISCRIMINATION  --  best adaptation method vs ERM (target AUROC)",
+               data, metric_name="auroc")
+    rows += run("tgt_ece", "low", RECAL + ADAPT,
+                "CALIBRATION  --  best method vs ERM (target ECE, lower is better)",
+                data, metric_name="ece")
+
+    # Named after the raw file it was computed from, so the stars in a figure
+    # can always be traced to the run that produced them.
+    prefix = os.path.basename(args.raw).replace("_raw.csv", "")
+    out = args.out or os.path.join(REPO_TABLES, f"{prefix}_maxstat.csv")
+    with open(out, "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+        w.writeheader()
+        w.writerows(rows)
+    print(f"\n  scritto {out}  ({len(rows)} righe)")
 
 
 if __name__ == "__main__":
