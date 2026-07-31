@@ -43,7 +43,7 @@ from matplotlib.lines import Line2D
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TABLES = os.path.join(ROOT, "outputs", "tables")
-OUTDIR = os.path.expanduser("~/Desktop/shift-surv-paper-images")
+OUTDIR = os.path.join(ROOT, "outputs", "figures", "paper")
 
 SCENARIOS = [
     ("covariate_shift",       "Covariate"),

@@ -34,7 +34,7 @@ import matplotlib.pyplot as plt
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TABLES = os.path.join(ROOT, "outputs", "tables")
-OUTDIR = os.path.expanduser("~/Desktop/shift-surv-paper-images")
+OUTDIR = os.path.join(ROOT, "outputs", "figures", "paper")
 
 # key in the CSV -> (label, colour). ERM is the baseline, drawn dark.
 METHODS = [

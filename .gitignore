@@ -11,7 +11,10 @@ generator/shift_components.py
 utils/plotting.py
 
 # ── Experiment outputs (regenerable) ─────────────────────────────────────────
-outputs/
+outputs/*
+!outputs/figures/
+outputs/figures/*
+!outputs/figures/paper/
 outputs [0-9]*/
 
 # ── Python cache ──────────────────────────────────────────────────────────────

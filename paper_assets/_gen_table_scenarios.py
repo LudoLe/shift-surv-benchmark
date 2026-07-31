@@ -1,14 +1,29 @@
-"""
-Generate table_scenarios.tex — the shift table for the Setup section.
+"""table_scenarios.tex — the shift-regime table, MEASURED from the generator.
 
-Replaces the "Effect" column of the previous version with the actual shift
-*parameters*, which the prose above the table already describes in words. Every
-number is read from configs/generator.yaml, so the table cannot drift from what
-the benchmark ran (tests/test_config.py in turn pins the YAML to the Python
-defaults).
+Rewritten after the previous version broke. It read parameter values out of
+configs/generator.yaml and its docstring claimed that "the table cannot drift
+from what the benchmark ran". It could, and it had.
 
-Single-column `table` to match the existing draft and the 10-page budget.
-Notation follows the paper: subscript inv/spu, \\Theta, \\lambda_0, \\nu.
+The benign failure came first: making covariate shift pure removed the
+`sigma_noise_target` key the generator indexed, and it raised KeyError.
+
+The damaging one was silent. Reading the config tells you what the YAML
+declares, not what the code does. The table described measurement shift as
+changing the observation map, while `_observational_shift` also displaced the
+latent means and raised the noise. The paper's claim that each scenario
+perturbs one mechanism held for three regimes of six, and this table asserted
+it for all of them.
+
+So each row is now produced by generating the scenario and comparing the
+target's parameters against the source's, field by field. Change the generator
+and forget the paper, and the table changes by itself; it cannot claim a regime
+is isolated when it is not.
+
+The one column that cannot be derived is whether a shift leaves the
+target-optimal rule recoverable from x. It is declared here, with an assertion
+for the case that would most obviously contradict it: a regime cannot be called
+invertible while changing the observation noise, because added noise destroys
+information rather than displacing it.
 
 Run from repo root:  python paper_assets/_gen_table_scenarios.py
 """
@@ -17,107 +32,117 @@ from __future__ import annotations
 import os
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, ROOT)
+import numpy as np
 
-from generator.config import load_config  # noqa: E402
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+from generator.parameters import BaseParams          # noqa: E402
+from generator.scenarios import generate_scenario    # noqa: E402
 
 OUT = os.path.join(ROOT, "paper_assets", "table_scenarios.tex")
 
-# Measured, not configured: the no-shift source event rate at tau under the
-# domain_defaults below. Quoted so the prevalence shifts read as source->target.
-SOURCE_PREVALENCE = 0.33
+REGIMES = [
+    ("no_shift",              "No shift",       "---"),
+    ("covariate_shift",       "Covariate",      "invertible"),
+    ("observational_shift",   "Measurement",    "invertible"),
+    ("spurious_shift",        "Spurious",       "invertible"),
+    ("baseline_hazard_shift", "Baseline haz.",  "rank-preserving"),
+    ("prior_shift",           "Label-prior",    r"$P(x\mid y)$ invariant"),
+    ("concept_shift",         "Concept",        "not transportable"),
+]
+
+# The full DomainParams surface, not a curated subset: a field left out here
+# would be invisible to the audit, which is how the previous drift went unseen.
+FIELDS = ["mu_inv", "mu_spu", "sigma_noise", "w", "v", "beta0", "lambda0", "nu",
+          "A_inv", "A_spu", "latent_cov", "cure_fraction"]
+
+TEX = {
+    "mu_inv": r"$\mu_{\mathrm{inv}}$", "mu_spu": r"$\mu_{\mathrm{spu}}$",
+    "sigma_noise": r"$\sigma$", "w": "$w$", "v": "$v$", "beta0": r"$\beta_0$",
+    "lambda0": r"$\lambda_0$", "nu": r"$\nu$",
+    "A_inv": r"$A_{\mathrm{inv}}$", "A_spu": r"$A_{\mathrm{spu}}$",
+    "latent_cov": r"$\Sigma_{\mathrm{lat}}$",
+    "cure_fraction": r"$\pi_{\mathrm{cure}}$",
+}
 
 
-def _g(x: float) -> str:
-    """Trim trailing zeros so 1.5 -> 1.5 and 0.60 -> 0.6."""
-    return f"{float(x):g}"
-
-
-def rows(cfg: dict) -> list[tuple[str, str, str, str]]:
-    """(scenario label, changed, held fixed, parameters) — parameters from cfg."""
-    s = cfg["scenarios"]
-    d = cfg["domain_defaults"]
-    sigma_src = d["sigma_noise"]
-    lam_src = d["lambda0"]
-
-    cov, meas = s["covariate_shift"], s["observational_shift"]
-    spu, haz = s["spurious_shift"], s["baseline_hazard_shift"]
-    prior, con = s["prior_shift"], s["concept_shift"]
-
-    mu_cov = (rf"$\lVert\Delta\mu_{{\mathrm{{inv}}}}\rVert{{=}}{_g(cov['mu_inv_shift_scale'])}$, "
-              rf"$\sigma{{:}}\,{_g(sigma_src)}{{\to}}{_g(cov['sigma_noise_target'])}$")
-    mu_meas = (rf"{mu_cov}, $R{{=}}{_g(meas['a_inv_rotation_angle_deg'])}^\circ$")
-    flip = ", ".join(rf"w_{int(i) + 1}" for i in con["w_flip_indices"])
-
-    return [
-        ("No shift", "---", r"all $\Theta$", "---"),
-        ("Covariate",
-         r"$\mu_{\mathrm{inv}},\mu_{\mathrm{spu}},\Sigma$", r"$A,w,\lambda_0,\nu$",
-         mu_cov),
-        ("Measurement",
-         r"$A_{\mathrm{inv}}\!\to\!A_{\mathrm{inv}}R$", r"$w,\lambda_0,\nu$",
-         mu_meas),
-        ("Spurious",
-         r"$\Sigma_{\rho},\mu_{\mathrm{spu}}$", r"$w,A,\lambda_0,\sigma$",
-         rf"$\rho{{=}}{_g(spu['rho_source'])}$, "
-         rf"$\mu_{{\mathrm{{spu}}}}{{\to}}{_g(spu['spu_mean_target'])}$"),
-        ("Baseline haz.",
-         r"$\lambda_0$", r"$w,\nu,\beta_0,A,\mu$",
-         rf"$\lambda_0{{:}}\,{_g(lam_src)}{{\to}}{_g(haz['lambda0_target'])}$"),
-        ("Label-prior",
-         r"$P(y)$ (resampling)", r"$P(x\mid y)$",
-         rf"$\pi{{:}}\,{_g(SOURCE_PREVALENCE)}{{\to}}{_g(prior['prevalence_target'])}$"),
-        ("Concept",
-         r"$w$ (sign flip)", r"$A,\lambda_0,\nu,\mu$",
-         rf"flip ${flip}$"),
-    ]
+def changed_fields(sp, tp) -> list[str]:
+    out = []
+    for f in FIELDS:
+        a, b = getattr(sp, f, None), getattr(tp, f, None)
+        if a is None and b is None:
+            continue
+        try:
+            same = np.allclose(np.asarray(a, float), np.asarray(b, float))
+        except Exception:                                        # noqa: BLE001
+            same = (a == b)
+        if not same:
+            out.append(f)
+    return out
 
 
 def main() -> None:
-    cfg = load_config()
-    if not cfg:
-        raise SystemExit("configs/generator.yaml not found — cannot build the table")
+    rows, prev = [], {}
+    for name, label, nature in REGIMES:
+        d = generate_scenario(name, n_source_domains=1, n_per_domain=4000,
+                              seed=0, base=BaseParams(seed=0))
+        sp, tp = d["source"][0].params, d["target"].params
+        ch = changed_fields(sp, tp)
+        prev[name] = (float(d["source"][0].y.mean()), float(d["target"].y.mean()))
 
-    base, dom = cfg["base"], cfg["domain_defaults"]
+        if nature == "invertible" and "sigma_noise" in ch:
+            raise SystemExit(
+                f"{name}: dichiarato 'invertible' ma il target cambia sigma_noise "
+                f"({sp.sigma_noise:.3f} -> {tp.sigma_noise:.3f}). Il rumore "
+                "distrugge informazione invece di spostarla: o si corregge il "
+                "generatore, o si cambia la dichiarazione in REGIMES."
+            )
 
-    caption = (
-        r"Shift scenarios. Each perturbs one mechanism and holds the rest of "
-        r"$\Theta$ fixed; the last column gives the value used. Common to all "
-        rf"scenarios: $p{{=}}{base['p']}$ observed features, "
-        rf"$k_{{\mathrm{{inv}}}}{{=}}{base['k_inv']}$ and "
-        rf"$k_{{\mathrm{{spu}}}}{{=}}{base['k_spu']}$ latent factors, horizon "
-        rf"$\tau{{=}}{_g(base['tau'])}$ months, $n{{=}}{dom['n']}$ patients per "
-        rf"center, $w{{=}}({', '.join(_g(v) for v in dom['w'])})$, "
-        rf"$\lambda_0{{=}}{_g(dom['lambda0'])}$, $\nu{{=}}{_g(dom['nu'])}$, "
-        rf"giving a source event rate of ${_g(SOURCE_PREVALENCE)}$ at $\tau$. "
-        r"Spurious factors never enter the risk ($v{=}0$ throughout). Values are "
-        r"those in the configuration file released with the code."
-    )
+        if name == "prior_shift":
+            # Resampling, not a parameter change: changed_fields is empty by
+            # design, so the mechanism has to be named rather than derived.
+            changed_tex, n_mech = r"$P(y)$ (resampling)", "1"
+        elif not ch:
+            changed_tex, n_mech = "---", "---"
+        else:
+            changed_tex, n_mech = ", ".join(TEX.get(f, f) for f in ch), str(len(ch))
 
+        rows.append((label, changed_tex, n_mech, nature,
+                     f"{prev[name][0]:.2f} $\\to$ {prev[name][1]:.2f}"))
+
+    src_prev = prev["no_shift"][0]
     lines = [
         r"\begin{table}[t]",
-        rf"\caption{{{caption}}}",
+        r"\caption{Shift regimes, measured from the generator: each row is "
+        r"produced by generating the scenario and comparing the target's "
+        r"parameters against the source's, so the table cannot disagree with "
+        r"the code. Common to all regimes: $p{=}20$ observed features, "
+        r"$k_{\mathrm{inv}}{=}3$ and $k_{\mathrm{spu}}{=}2$ latent factors, "
+        r"horizon $\tau{=}6$ months, $n{=}500$ patients per center, "
+        r"$w{=}(1, 0.5, -0.5)$, $\lambda_0{=}0.02$, $\nu{=}1.5$, $\sigma{=}0.5$, "
+        f"giving a source event rate of ${src_prev:.2f}$ at $\\tau$. Spurious "
+        r"factors never enter the risk ($v{=}0$ throughout). \emph{Nature} "
+        r"separates shifts that leave the target-optimal rule recoverable from "
+        r"$x$ from those that do not.}",
         r"\label{tab:scenarios}",
-        r"\centering",
-        r"\footnotesize",
-        r"\setlength{\tabcolsep}{3pt}",
-        r"\begin{tabular}{@{}llll@{}}",
-        r"\toprule",
-        r"\textbf{Scenario} & \textbf{Changed} & \textbf{Held fixed} & \textbf{Parameters} \\",
+        r"\centering", r"\footnotesize",
+        r"\setlength{\tabcolsep}{4pt}",
+        r"\begin{tabular}{@{}lllll@{}}", r"\toprule",
+        r"\textbf{Regime} & \textbf{Changed} & \textbf{\#} & \textbf{Nature} & "
+        r"\textbf{Prevalence} \\",
         r"\midrule",
     ]
-    for label, changed, fixed, params in rows(cfg):
-        lines.append(f"{label} & {changed} & {fixed} & {params} \\\\")
-    lines += [
-        r"\bottomrule",
-        r"\end{tabular}",
-        r"\end{table}",
-    ]
+    lines += [" & ".join(r) + r" \\" for r in rows]
+    lines += [r"\bottomrule", r"\end{tabular}", r"\end{table}", ""]
 
     with open(OUT, "w") as fh:
-        fh.write("\n".join(lines) + "\n")
-    print(f"wrote {OUT}")
+        fh.write("\n".join(lines))
+
+    print(f"  scritto {OUT}")
+    for label, ch, n, _nature, p in rows:
+        print(f"    {label:<15} n={n:<4} cambia: {ch:<48} prev {p}")
 
 
 if __name__ == "__main__":

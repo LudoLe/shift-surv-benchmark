@@ -33,7 +33,7 @@ from matplotlib.lines import Line2D
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DOWNLOADS = os.path.expanduser("~/Downloads/shift-surv-outputs/tables")
-OUTDIR = os.path.expanduser("~/Desktop/shift-surv-paper-images")
+OUTDIR = os.path.join(ROOT, "outputs", "figures", "paper")
 
 # Method family -> colour, matching the palette already used in the paper.
 ADAPT, GENER, RECAL = "#D95F0E", "#1B9E77", "#E6B422"

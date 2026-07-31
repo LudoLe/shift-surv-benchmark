@@ -36,7 +36,7 @@ from scipy import stats
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO_TABLES = os.path.join(ROOT, "outputs", "tables")
 PRIOR_TABLES = os.path.expanduser("~/Downloads/shift-surv-outputs/tables")
-OUTDIR = os.path.expanduser("~/Desktop/shift-surv-paper-images")
+OUTDIR = os.path.join(ROOT, "outputs", "figures", "paper")
 
 N_GRID = [250, 500, 1000, 2000]
 

@@ -6,13 +6,13 @@
 \cmidrule(lr){2-3}\cmidrule(lr){4-5}
 Scenario & Oracle & Source & Source (td) & ERM (Tab.~\ref{tab:auroc}) \\
 \midrule
-No shift & 0.758\,{\small$\pm$0.012} & 0.708\,{\small$\pm$0.013} & 0.753\,{\small$\pm$0.017} & 0.749\,{\small$\pm$0.013} \\
-Covariate & 0.758\,{\small$\pm$0.012} & 0.669\,{\small$\pm$0.016} & 0.706\,{\small$\pm$0.019} & 0.697\,{\small$\pm$0.017} \\
-Measurement & 0.758\,{\small$\pm$0.012} & 0.592\,{\small$\pm$0.019} & 0.615\,{\small$\pm$0.027} & 0.604\,{\small$\pm$0.025} \\
-Spurious & 0.756\,{\small$\pm$0.012} & 0.699\,{\small$\pm$0.012} & 0.741\,{\small$\pm$0.015} & 0.737\,{\small$\pm$0.015} \\
-Baseline hazard & 0.753\,{\small$\pm$0.012} & 0.705\,{\small$\pm$0.013} & 0.786\,{\small$\pm$0.017} & 0.778\,{\small$\pm$0.013} \\
-Concept & 0.578\,{\small$\pm$0.016} & 0.569\,{\small$\pm$0.017} & 0.593\,{\small$\pm$0.022} & 0.595\,{\small$\pm$0.025} \\
-Shape & 0.762\,{\small$\pm$0.013} & 0.713\,{\small$\pm$0.013} & 0.754\,{\small$\pm$0.015} & 0.749\,{\small$\pm$0.013} \\
+No shift & 0.758\,{\small$\pm$0.012} & 0.708\,{\small$\pm$0.013} & 0.753\,{\small$\pm$0.026} & 0.749\,{\small$\pm$0.013} \\
+Covariate & 0.758\,{\small$\pm$0.012} & 0.669\,{\small$\pm$0.016} & 0.706\,{\small$\pm$0.031} & 0.697\,{\small$\pm$0.017} \\
+Measurement & 0.758\,{\small$\pm$0.012} & 0.592\,{\small$\pm$0.019} & 0.612\,{\small$\pm$0.041} & 0.604\,{\small$\pm$0.025} \\
+Spurious & 0.756\,{\small$\pm$0.012} & 0.699\,{\small$\pm$0.012} & 0.744\,{\small$\pm$0.016} & 0.737\,{\small$\pm$0.015} \\
+Baseline hazard & 0.753\,{\small$\pm$0.012} & 0.705\,{\small$\pm$0.013} & 0.782\,{\small$\pm$0.019} & 0.778\,{\small$\pm$0.013} \\
+Concept & 0.578\,{\small$\pm$0.016} & 0.569\,{\small$\pm$0.017} & 0.587\,{\small$\pm$0.032} & 0.595\,{\small$\pm$0.025} \\
+Shape & 0.762\,{\small$\pm$0.013} & 0.713\,{\small$\pm$0.013} & 0.746\,{\small$\pm$0.031} & 0.749\,{\small$\pm$0.013} \\
 \bottomrule
 \end{tabular}
 \caption{Survival validity check (Cox PH, $\sim$35\% censored; mean\,$\pm$\,95\% CI over 10 seeds). A genuine time-to-event model on censored data reproduces the transport pattern: the source model sits below the invariant oracle (C-index headroom), and its time-dependent AUC@$\tau$ closely matches the fixed-horizon ERM AUROC of Table~\ref{tab:auroc} (last column), confirming the headline finding is not an artifact of binarization or of discarding censoring.}

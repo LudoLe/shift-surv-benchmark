@@ -1,20 +1,20 @@
 \begin{table}[t]
-\caption{Shift scenarios. Each perturbs one mechanism and holds the rest of $\Theta$ fixed; the last column gives the value used. Common to all scenarios: $p{=}20$ observed features, $k_{\mathrm{inv}}{=}3$ and $k_{\mathrm{spu}}{=}2$ latent factors, horizon $\tau{=}6$ months, $n{=}500$ patients per center, $w{=}(1, 0.5, -0.5)$, $\lambda_0{=}0.02$, $\nu{=}1.5$, giving a source event rate of $0.33$ at $\tau$. Spurious factors never enter the risk ($v{=}0$ throughout). Values are those in the configuration file released with the code.}
+\caption{Shift regimes, measured from the generator: each row is produced by generating the scenario and comparing the target's parameters against the source's, so the table cannot disagree with the code. Common to all regimes: $p{=}20$ observed features, $k_{\mathrm{inv}}{=}3$ and $k_{\mathrm{spu}}{=}2$ latent factors, horizon $\tau{=}6$ months, $n{=}500$ patients per center, $w{=}(1, 0.5, -0.5)$, $\lambda_0{=}0.02$, $\nu{=}1.5$, $\sigma{=}0.5$, giving a source event rate of $0.33$ at $\tau$. Spurious factors never enter the risk ($v{=}0$ throughout). \emph{Nature} separates shifts that leave the target-optimal rule recoverable from $x$ from those that do not.}
 \label{tab:scenarios}
 \centering
 \footnotesize
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}llll@{}}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lllll@{}}
 \toprule
-\textbf{Scenario} & \textbf{Changed} & \textbf{Held fixed} & \textbf{Parameters} \\
+\textbf{Regime} & \textbf{Changed} & \textbf{\#} & \textbf{Nature} & \textbf{Prevalence} \\
 \midrule
-No shift & --- & all $\Theta$ & --- \\
-Covariate & $\mu_{\mathrm{inv}},\mu_{\mathrm{spu}},\Sigma$ & $A,w,\lambda_0,\nu$ & $\lVert\Delta\mu_{\mathrm{inv}}\rVert{=}1.5$, $\sigma{:}\,0.5{\to}0.8$ \\
-Measurement & $A_{\mathrm{inv}}\!\to\!A_{\mathrm{inv}}R$ & $w,\lambda_0,\nu$ & $\lVert\Delta\mu_{\mathrm{inv}}\rVert{=}1.5$, $\sigma{:}\,0.5{\to}0.8$, $R{=}60^\circ$ \\
-Spurious & $\Sigma_{\rho},\mu_{\mathrm{spu}}$ & $w,A,\lambda_0,\sigma$ & $\rho{=}0.7$, $\mu_{\mathrm{spu}}{\to}-2.5$ \\
-Baseline haz. & $\lambda_0$ & $w,\nu,\beta_0,A,\mu$ & $\lambda_0{:}\,0.02{\to}0.06$ \\
-Label-prior & $P(y)$ (resampling) & $P(x\mid y)$ & $\pi{:}\,0.33{\to}0.6$ \\
-Concept & $w$ (sign flip) & $A,\lambda_0,\nu,\mu$ & flip $w_2, w_3$ \\
+No shift & --- & --- & --- & 0.33 $\to$ 0.33 \\
+Covariate & $\mu_{\mathrm{inv}}$, $\mu_{\mathrm{spu}}$ & 2 & invertible & 0.26 $\to$ 0.33 \\
+Measurement & $A_{\mathrm{inv}}$ & 1 & invertible & 0.26 $\to$ 0.27 \\
+Spurious & $\Sigma_{\mathrm{lat}}$ & 1 & invertible & 0.34 $\to$ 0.33 \\
+Baseline haz. & $\lambda_0$ & 1 & rank-preserving & 0.33 $\to$ 0.59 \\
+Label-prior & $P(y)$ (resampling) & 1 & $P(x\mid y)$ invariant & 0.33 $\to$ 0.60 \\
+Concept & $w$ & 1 & not transportable & 0.33 $\to$ 0.33 \\
 \bottomrule
 \end{tabular}
 \end{table}
