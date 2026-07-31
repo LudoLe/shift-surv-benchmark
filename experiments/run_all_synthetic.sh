@@ -23,7 +23,7 @@ NCORES="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 JOBS="${1:-$(( NCORES / 2 ))}"
 N_SEEDS="${2:-10}"
 (( JOBS < 1 )) && JOBS=1
-(( JOBS > 6 )) && JOBS=6
+(( JOBS > 8 )) && JOBS=8
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -55,9 +55,16 @@ echo "=== archiviate $moved tabelle in $ARCHIVE"
 # _gen_fig3_ece_bars.py, _gen_table_survival.py). Running under the default
 # prefix produces correct numbers in files no figure generator opens, and the
 # mismatch only surfaces when the figures are regenerated.
+# prior_shift is in APPENDIX_SCENARIOS, not CORE_SCENARIOS, so the main
+# benchmark does not produce it -- yet the paper reports label-prior as one of
+# the six core regimes and fig_disc/fig_cal both show it. It therefore needs a
+# dedicated job per setting, rather than being picked up incidentally from
+# whichever --include_appendix run happened to cover it.
 jobs_list=(
   "benchmark_1s1t_iwcv|"
+  "benchmark_1s1t_prior|--scenarios prior_shift"
   "benchmark_3s1t|--n_source_domains 3"
+  "benchmark_3s1t_prior|--scenarios prior_shift --n_source_domains 3"
   "benchmark_1s1t_full|--include_appendix"
   "n_sweep_iwcv|--n_sweep 250,500,1000,2000"
   "n_sweep_iwcv_prior|--n_sweep 250,500,1000,2000 --scenarios prior_shift"
@@ -128,6 +135,16 @@ for prefix in benchmark_1s1t_iwcv benchmark_3s1t benchmark_1s1t_full; do
     echo "      diff <(grep -v covariate_shift $old) <(grep -v covariate_shift $new) | head"
   fi
 done
+
+# run_survival.py is a different entry point: it turns on exponential censoring
+# and fits a Cox model, and produces survival_cox_summary.csv, which
+# _gen_table_survival.py reads. It was missing from every runner.
+echo
+echo "=== validita' survival (Cox su dati censurati)"
+python -m experiments.run_survival --out_prefix survival_cox \
+    > outputs/logs/survival_cox.log 2>&1 \
+  && echo "  OK    survival_cox" \
+  || { echo "  FAIL  survival_cox   (vedi outputs/logs/survival_cox.log)"; failed+=("survival_cox"); }
 
 if (( ${#failed[@]} )); then
   echo
