@@ -30,7 +30,7 @@ from sklearn.calibration import calibration_curve
 from sklearn.isotonic import IsotonicRegression
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 
@@ -169,6 +169,76 @@ def fit_spurious_oracle(
     return _fit_and_score(X_train, y_train, source_datasets, target_dataset,
                           feature_attr="u_spu", feature_set="spurious_oracle",
                           model=LogisticRegression(**_LR_KWARGS))
+
+
+def fit_observed_target_oracle(
+    source_datasets: list[DomainDataset],
+    target_dataset: DomainDataset,
+    n_folds: int = 5,
+    seed: int = 0,
+) -> dict:
+    """Observed-data target oracle: what x can predict *in the target*.
+
+    A logistic regression trained on the labelled target covariates, scored by
+    cross-validated out-of-fold predictions so the estimate is not optimistic.
+    It is an analytic reference only: it uses target labels and is never fitted,
+    tuned or selected as a compared method. ``source_datasets`` is accepted and
+    ignored, so the call signature matches every other baseline.
+
+    Why it is needed alongside the latent oracle
+    --------------------------------------------
+    The latent oracle reads u_inv directly, bypassing the observation model, so
+    the ERM-to-latent-oracle gap mixes two different things. Under no shift it
+    is already 0.068, purely because the methods see 20 noisy covariates while
+    the oracle sees the three latent factors -- nothing to do with transfer.
+    And when a regime changes the observation process, that gap grows for a
+    reason no method operating on x could undo.
+
+    With both references the gap splits cleanly:
+
+        latent oracle - observed-data oracle
+            information lost in the observation process: unavailable in x,
+            recoverable by nobody.
+        observed-data oracle - practical method
+            the margin an unsupervised method left on the table: recoverable
+            in principle from x, so a genuine method failure.
+
+    Only the second belongs in a claim about adaptation failing.
+    """
+    X = np.asarray(target_dataset.x, dtype=float)
+    y = np.asarray(target_dataset.y).astype(int)
+
+    oof = np.full(len(y), np.nan)
+    if len(np.unique(y)) >= 2:
+        n_splits = max(2, min(n_folds, np.bincount(y).min()))
+        skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+        for tr, te in skf.split(X, y):
+            sc = StandardScaler().fit(X[tr])
+            m = LogisticRegression(**_LR_KWARGS)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=ConvergenceWarning)
+                m.fit(sc.transform(X[tr]), y[tr])
+            oof[te] = m.predict_proba(sc.transform(X[te]))[:, 1]
+
+    target_score = {
+        "auroc":       round(auroc(y, oof), 4),
+        "auprc":       round(auprc(y, oof), 4),
+        "ece":         round(ece(y, oof), 4),
+        "f1":          round(f1(y, oof), 4),
+        "sensitivity": round(sensitivity(y, oof), 4),
+        "specificity": round(specificity(y, oof), 4),
+        "prevalence":  round(prevalence(y), 4),
+        "n":           len(y),
+    }
+    return {
+        "feature_set":    "observed_target_oracle",
+        "source_domains": {},
+        "source_pooled":  {},          # not defined: never trained on source
+        "target":         target_score,
+        "target_probs":   oof,
+        "model":          None,
+        "scaler":         None,
+    }
 
 
 def fit_all_observed(

@@ -72,7 +72,7 @@ import matplotlib.pyplot as plt
 from generator.scenarios import generate_scenario, SCENARIO_NAMES
 from experiments.baselines import (
     fit_invariant_oracle, fit_all_observed, fit_prior_recalib,
-    fit_platt_scaling, fit_isotonic,
+    fit_platt_scaling, fit_isotonic, fit_observed_target_oracle,
 )
 from experiments.adaptation_methods import fit_coral, fit_dann, fit_cdan, fit_iw_erm, fit_irm
 from experiments.group_dro import fit_group_dro
@@ -97,8 +97,9 @@ APPENDIX_SCENARIOS = [
 
 # Short display labels (for column headers)
 _DISPLAY = {
-    "invariant_oracle": "inv_oracle",
-    "all_observed":     "lr_erm",
+    "invariant_oracle":      "inv_oracle",
+    "observed_target_oracle": "obs_oracle",
+    "all_observed":          "lr_erm",
     "iw_erm":           "iw_erm",
     "coral":            "coral",
     "irm":              "irm",
@@ -139,6 +140,10 @@ def _run_one(
 
     results = [
         fit_invariant_oracle(src, tgt),
+        # Analytic reference only: trained on target labels, cross-validated,
+        # never selected or tuned as a compared method. Separates information
+        # unavailable in x from margin the unsupervised methods left unrecovered.
+        fit_observed_target_oracle(src, tgt, seed=seed),
         fit_all_observed(src, tgt),
         fit_iw_erm(src, tgt, seed=seed),
         fit_coral(src, tgt, seed=seed),
@@ -602,8 +607,8 @@ def run_adaptation(
         seeds = list(range(10))
 
     methods = [
-        "invariant_oracle", "all_observed", "iw_erm", "coral",
-        "prior_recalib", "platt_scaling", "isotonic", "dann", "cdan",
+        "invariant_oracle", "observed_target_oracle", "all_observed", "iw_erm",
+        "coral", "prior_recalib", "platt_scaling", "isotonic", "dann", "cdan",
     ]
     # IRM and GroupDRO (multi-source domain generalization) are only meaningful,
     # and only produced by _run_one, when there are >=2 source centers.
@@ -717,8 +722,8 @@ def run_n_sweep(
       - one aggregated plot: AUROC vs n, per method, per scenario
     """
     methods = [
-        "invariant_oracle", "all_observed", "iw_erm", "coral",
-        "prior_recalib", "platt_scaling", "isotonic", "dann", "cdan",
+        "invariant_oracle", "observed_target_oracle", "all_observed", "iw_erm",
+        "coral", "prior_recalib", "platt_scaling", "isotonic", "dann", "cdan",
     ]
     # n-sweep runs the 1-source regime, where IRM/GroupDRO reduce to ERM.
     sweep_agg: dict[int, list[dict]] = {}
