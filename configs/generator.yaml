@@ -45,21 +45,22 @@ scenarios:
   covariate_shift:          # P(x) moves, P(y|u_inv) fixed; mu shifted _|_ w
     mu_inv_shift_scale: 1.5
     mu_spu_shift_scale: 1.5
-    sigma_noise_target: 0.5 # unchanged from source: the shift is case-mix, not
-                            # noise.  Raising sigma here would change P(x|u),
-                            # i.e. the measurement model, and the regime would
-                            # confound case-mix with measurement degradation --
-                            # which no adaptation method can undo, because the
-                            # information is destroyed rather than displaced.
-                            # The noise increase lives in observational_shift.
+    # sigma_noise_target omitted on purpose: the target inherits sigma from the
+    # source, so Sigma matches the source's *realised* value (jitter included)
+    # rather than merely its nominal base. Pinning it to a constant would leave
+    # a residual difference and the regime would not be a pure mean shift.
     source_mu_scale: 0.3    # sources get random mu ~ N(0,1)*0.3
     source_sigma_base: 0.5      # source noise std, before jitter
     source_sigma_jitter: 0.1    # sigma ~ U(base-jitter, base+jitter) per source
 
-  observational_shift:      # "measurement": mu shift + rotation of A_inv
-    mu_inv_shift_scale: 1.5
-    mu_spu_shift_scale: 1.5
-    sigma_noise_target: 0.8
+  observational_shift:      # "measurement": ONLY the observation map rotates
+    # Latent means and sigma are inherited, so this is not covariate shift with
+    # a rotation bolted on. The rotation is orthogonal (invertible) and sigma is
+    # unchanged, so no information is destroyed: the target-optimal rule stays
+    # recoverable from x in principle, which is what makes an unrecovered gap
+    # attributable to the methods rather than to the observation process.
+    mu_inv_shift_scale: 0.0
+    mu_spu_shift_scale: 0.0
     a_inv_rotation_angle_deg: 60
     source_mu_scale: 0.3
     source_sigma_base: 0.5
@@ -67,8 +68,10 @@ scenarios:
 
   spurious_shift:           # latent u_inv<->u_spu correlation in source, broken in target
     rho_source: 0.70        # cross-block correlation of latent_cov (source)
-    spu_mean_target: -2.5   # target spurious mean flips
-    sigma_noise_target: 0.5 # unchanged from source: the shift is latent, not noise
+    # spu_mean_target and sigma_noise_target omitted: both inherited from the
+    # source, so ONLY the cross-covariance changes. Moving mu_spu as well would
+    # make this a compound spurious + covariate shift -- a different regime,
+    # which should be named as one rather than reported as "spurious".
     # target latent_cov = identity (independent)
 
   baseline_hazard_shift:    # rate shift only; ranking preserved

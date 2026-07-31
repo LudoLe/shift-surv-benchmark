@@ -174,7 +174,7 @@ def _covariate_shift(
     seed: int,
     mu_inv_shift_scale: float = 1.5,
     mu_spu_shift_scale: float = 1.5,
-    sigma_noise_target: float = 0.5,
+    sigma_noise_target: float | None = None,
     source_mu_scale: float = 0.3,
     source_sigma_base: float = 0.5,
     source_sigma_jitter: float = 0.1,
@@ -222,8 +222,13 @@ def _covariate_shift(
     target.n = n
     target.mu_inv = d * mu_inv_shift_scale
     target.mu_spu = np.ones(base.k_spu) * mu_spu_shift_scale
-    target.sigma_noise = sigma_noise_target
-    # A_inv unchanged: same measurement model, different population location
+    # sigma_noise and A_inv are deliberately NOT assigned: the target inherits
+    # them from source_params[0].copy(), so Sigma is identical to the source's
+    # realised value rather than merely close to it. Setting it to a constant
+    # (even the source's nominal base) would leave a residual difference,
+    # because the sources draw sigma with jitter.
+    if sigma_noise_target is not None:
+        target.sigma_noise = sigma_noise_target
 
     return source_params, target
 
@@ -234,9 +239,9 @@ def _observational_shift(
     n: int,
     base: BaseParams,
     seed: int,
-    mu_inv_shift_scale: float = 1.5,
-    mu_spu_shift_scale: float = 1.5,
-    sigma_noise_target: float = 0.8,
+    mu_inv_shift_scale: float = 0.0,
+    mu_spu_shift_scale: float = 0.0,
+    sigma_noise_target: float | None = None,
     a_inv_rotation_angle: float = np.pi / 3,   # 60 degrees
     source_mu_scale: float = 0.3,
     source_sigma_base: float = 0.5,
@@ -277,9 +282,19 @@ def _observational_shift(
     target = source_params[0].copy()
     target.domain_id = target_id
     target.n = n
-    target.mu_inv = d * mu_inv_shift_scale
-    target.mu_spu = np.ones(base.k_spu) * mu_spu_shift_scale
-    target.sigma_noise = sigma_noise_target
+    # Pure measurement shift: ONLY the observation map changes. The latent means
+    # and the noise scale are inherited from source_params[0].copy(), so this
+    # regime is not covariate shift with a rotation bolted on. R is an
+    # orthogonal (invertible) rotation and sigma is unchanged, so no information
+    # is destroyed -- the target-optimal rule stays recoverable from x in
+    # principle, which is what makes the unrecovered gap attributable to the
+    # methods rather than to the observation process.
+    if mu_inv_shift_scale:
+        target.mu_inv = d * mu_inv_shift_scale
+    if mu_spu_shift_scale:
+        target.mu_spu = np.ones(base.k_spu) * mu_spu_shift_scale
+    if sigma_noise_target is not None:
+        target.sigma_noise = sigma_noise_target
     target.A_inv = source_params[0].A_inv @ R
 
     return source_params, target
@@ -292,8 +307,8 @@ def _spurious_shift(
     base: BaseParams,
     seed: int,
     rho_source: float = 0.70,
-    spu_mean_target: float = -2.5,
-    sigma_noise_target: float = 0.5,
+    spu_mean_target: float | None = None,
+    sigma_noise_target: float | None = None,
 ) -> tuple[list[DomainParams], DomainParams]:
     """
     Spurious shortcut shift.  v_d = 0 throughout (spurious factors never
@@ -355,9 +370,14 @@ def _spurious_shift(
     target.domain_id = target_id
     target.n = n
     target.v = np.zeros(base.k_spu)
-    target.mu_spu = np.full(base.k_spu, spu_mean_target)  # spurious mean shifts
-    target.latent_cov = cov_tgt                            # no within-domain correlation
-    target.sigma_noise = sigma_noise_target   # same noise as source by default
+    target.latent_cov = cov_tgt   # ONLY the cross-covariance changes
+    # mu_spu is inherited (zeros, as set on the sources above): moving it as
+    # well would make this a compound spurious + covariate shift, which is a
+    # different regime and should be named as one.
+    if spu_mean_target is not None:
+        target.mu_spu = np.full(base.k_spu, spu_mean_target)
+    if sigma_noise_target is not None:
+        target.sigma_noise = sigma_noise_target
 
     return source_params, target
 
