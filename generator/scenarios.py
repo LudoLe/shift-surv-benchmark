@@ -124,6 +124,24 @@ def generate_scenario(
     # survival validity check (experiments/run_survival.py) turns it on so a
     # Cox model is trained and scored on genuinely censored data.
     if censoring_lambda > 0.0:
+        # The fixed-horizon label is y = 1[t_obs <= tau AND delta == 1], i.e.
+        # "event observed by tau". Without censoring that is exactly 1[T <= tau],
+        # the estimand the binary benchmark targets. With censoring it is not:
+        # a patient censored before tau has an unknown Y(tau) and is silently
+        # labelled 0, which biases the endpoint downward. Every binary
+        # experiment therefore leaves this at 0 -- only run_survival.py turns it
+        # on, and it fits a Cox model on (t_obs, delta) rather than using y.
+        # Warned rather than blocked because the parameter is legitimate for
+        # survival-side use; the point is that it must not reach the binary path.
+        warnings.warn(
+            f"censoring_lambda={censoring_lambda} is set. The fixed-horizon "
+            "label y then means 'event observed by tau', NOT 1[T <= tau]: "
+            "patients censored before tau are labelled 0 with unknown true "
+            "status. Use survival-aware evaluation (see run_survival.py), not "
+            "the binary endpoint.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
         for sp in source_p:
             sp.censoring_lambda = censoring_lambda
         target_p.censoring_lambda = censoring_lambda

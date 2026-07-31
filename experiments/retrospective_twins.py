@@ -212,6 +212,13 @@ def main() -> None:
     ap.add_argument("--out_prefix", default="retro_twins")
     args = ap.parse_args()
     warnings.filterwarnings("ignore")
+    # stdout is block-buffered when it is not a terminal, so a run piped to tee
+    # shows nothing for hours while TensorFlow's stderr warnings scroll past,
+    # which looks exactly like a hang. Line buffering costs nothing here.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except AttributeError:                                    # Python < 3.7
+        pass
 
     audit = pd.read_csv(args.audit)
     if args.transfers:
