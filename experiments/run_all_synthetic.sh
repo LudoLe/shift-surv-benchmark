@@ -23,7 +23,7 @@ NCORES="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 JOBS="${1:-$(( NCORES / 2 ))}"
 N_SEEDS="${2:-10}"
 (( JOBS < 1 )) && JOBS=1
-(( JOBS > 5 )) && JOBS=5
+(( JOBS > 6 )) && JOBS=6
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -42,11 +42,19 @@ done
 echo "=== archiviate $moved tabelle in $ARCHIVE"
 
 # --- job list: "prefix|args..." -------------------------------------------
+# The sweep prefixes are dictated by paper_assets/_gen_fig_nsweep.py, which
+# reads n_sweep_iwcv_n<N>_raw.csv for five regimes and n_sweep_iwcv_prior_n<N>_raw.csv
+# for label-prior -- the latter was run separately and its CSVs lived outside
+# the repo, under ~/Downloads/shift-surv-outputs. Regenerating it here puts it
+# in outputs/tables with everything else, so the figure no longer depends on a
+# directory that is not version-controlled and not on every machine.
+# N grid is _gen_fig_nsweep.py's N_GRID.
 jobs_list=(
   "benchmark_1s1t|"
   "benchmark_3s1t|--n_source_domains 3"
   "benchmark_1s1t_full|--include_appendix"
-  "n_sweep|--n_sweep 250,500,1000,2000"
+  "n_sweep_iwcv|--n_sweep 250,500,1000,2000"
+  "n_sweep_iwcv_prior|--n_sweep 250,500,1000,2000 --scenarios prior_shift"
   "ablation_no_iwcv|--scenarios covariate_shift --no_iwcv"
 )
 
@@ -79,8 +87,15 @@ echo
 echo "=== $(date +%F\ %T) — done"
 for entry in "${jobs_list[@]}"; do
   prefix="${entry%%|*}"
-  # n_sweep writes one table per n (n_sweep_n250_raw.csv, ...), so glob.
-  n_out=$(ls -1 "outputs/tables/${prefix}"*raw.csv 2>/dev/null | wc -l | tr -d ' ')
+  # A plain run writes <prefix>_raw.csv; a sweep writes one per n,
+  # <prefix>_n<N>_raw.csv. Match those two shapes exactly rather than
+  # globbing <prefix>*: that would let benchmark_1s1t be satisfied by
+  # benchmark_1s1t_full's output, and n_sweep_iwcv by n_sweep_iwcv_prior's.
+  if [ -s "outputs/tables/${prefix}_raw.csv" ]; then
+    n_out=1
+  else
+    n_out=$(ls -1 outputs/tables/${prefix}_n[0-9]*_raw.csv 2>/dev/null | wc -l | tr -d ' ')
+  fi
   if [ "$n_out" -gt 0 ]; then
     echo "  OK    $prefix   ($n_out raw table(s))"
   else
