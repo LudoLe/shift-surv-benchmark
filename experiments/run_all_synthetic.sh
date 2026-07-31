@@ -49,8 +49,14 @@ echo "=== archiviate $moved tabelle in $ARCHIVE"
 # in outputs/tables with everything else, so the figure no longer depends on a
 # directory that is not version-controlled and not on every machine.
 # N grid is _gen_fig_nsweep.py's N_GRID.
+# Every prefix below is taken from the CONSUMER, not from the README: the paper
+# figures read benchmark_1s1t_iwcv_*, not benchmark_1s1t_* (make_figures.py,
+# _gen_fig1_dotwhisker.py, _gen_fig1_transfer.py, _gen_fig2_bars.py,
+# _gen_fig3_ece_bars.py, _gen_table_survival.py). Running under the default
+# prefix produces correct numbers in files no figure generator opens, and the
+# mismatch only surfaces when the figures are regenerated.
 jobs_list=(
-  "benchmark_1s1t|"
+  "benchmark_1s1t_iwcv|"
   "benchmark_3s1t|--n_source_domains 3"
   "benchmark_1s1t_full|--include_appendix"
   "n_sweep_iwcv|--n_sweep 250,500,1000,2000"
@@ -108,7 +114,7 @@ done
 # same seeds and must come out byte-identical to the archived run.
 echo
 echo "=== controllo riproducibilita' (scenari NON toccati vs $ARCHIVE)"
-for prefix in benchmark_1s1t benchmark_3s1t benchmark_1s1t_full; do
+for prefix in benchmark_1s1t_iwcv benchmark_3s1t benchmark_1s1t_full; do
   old="$ARCHIVE/${prefix}_raw.csv"
   new="outputs/tables/${prefix}_raw.csv"
   if [ ! -f "$old" ] || [ ! -f "$new" ]; then
