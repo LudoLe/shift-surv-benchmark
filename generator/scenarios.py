@@ -241,8 +241,16 @@ def _covariate_shift(
     target = source_params[0].copy()
     target.domain_id = target_id
     target.n = n
-    target.mu_inv = d * mu_inv_shift_scale
-    target.mu_spu = np.ones(base.k_spu) * mu_spu_shift_scale
+    # Guarded, not unconditional: at scale 0 the assignment would set the target
+    # means to zero while the sources keep mu ~ N(0,1)*source_mu_scale, so "no
+    # shift" would still displace them. That is invisible at the benchmark's
+    # scale of 1.5, but it is exactly the setting the twin uses for its identity
+    # control and for its covariance-only variant, where it silently added a
+    # mean shift of ~0.6 to a regime that was supposed to have none.
+    if mu_inv_shift_scale:
+        target.mu_inv = d * mu_inv_shift_scale
+    if mu_spu_shift_scale:
+        target.mu_spu = np.ones(base.k_spu) * mu_spu_shift_scale
     # sigma_noise and A_inv are deliberately NOT assigned: the target inherits
     # them from source_params[0].copy(), so Sigma is identical to the source's
     # realised value rather than merely close to it. Setting it to a constant
