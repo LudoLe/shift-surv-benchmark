@@ -273,7 +273,14 @@ class SyntheticGenerator:
         # C ~ Exp(lambda_c); t_obs = min(T, C); delta = 1[T <= C].
         # When censoring_lambda == 0 there is no censoring: C = inf, delta = 1.
         if params.censoring_lambda > 0.0:
-            C_arr = rng.exponential(scale=1.0 / params.censoring_lambda, size=n)
+            # rate_i = lambda_c * exp(beta * eta_i). With beta = 0 this is the
+            # administrative case: censoring is independent of risk, so dropping
+            # patients of unknown status at tau only costs sample size. With
+            # beta > 0 the higher-risk patients are censored earlier, and the
+            # same exclusion becomes a selection on the outcome.
+            beta = getattr(params, "censoring_beta", 0.0)
+            rate = params.censoring_lambda * np.exp(beta * eta)
+            C_arr = rng.exponential(scale=1.0 / np.clip(rate, 1e-9, None), size=n)
         else:
             C_arr = np.full(n, np.inf)
         t_obs = np.minimum(T, C_arr)
@@ -286,6 +293,13 @@ class SyntheticGenerator:
         # y = 1[t_obs <= tau AND delta == 1]
         # Consistent with real-data labelling: event observed within the window.
         y = ((t_obs <= self.base.tau) & (delta == 1)).astype(int)
+        # y is what a centre records: "event observed by tau". Without censoring
+        # it equals 1[T <= tau]; with censoring it does not, because a patient
+        # censored before tau is recorded as 0 with unknown true status. T is
+        # carried on the dataset, so 1[T <= tau] stays recoverable for analysis
+        # and the two can be compared -- which is the point of simulating this
+        # at all, since on real data the true status of an excluded patient is
+        # by definition unavailable.
 
         p_copy = params.copy()
         p_copy.domain_id = d_id

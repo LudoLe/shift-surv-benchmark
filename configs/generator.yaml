@@ -107,6 +107,17 @@ scenarios:
     source_mu_spu_scale: 0.2
     source_sigma_noise: 0.5
 
+  censoring_shift:          # appendice: shift di ACCERTAMENTO dell'esito.
+    # Il vero 1[T<=tau] non cambia; cambia cosa il centro registra e per chi
+    # lo stato a tau e' noto. Motivato dai dati reali: in I3LUNG il follow-up
+    # mediano va da 7.7 a 12.9 mesi fra i centri, e la quota di pazienti con
+    # stato a sei mesi non osservato -- quindi esclusi dall'analisi -- va dallo
+    # 0% al 17%.
+    censoring_lambda_target: 0.06
+    censoring_beta_target: 0.8   # >0: i piu' gravi si perdono prima, quindi
+                                 # escludere gli stati ignoti seleziona
+                                 # sull'esito invece di ridurre solo la n
+
   cure_shift:               # mixture-cure target (non-proportional hazards)
     cure_fraction_target: 0.25
     cure_fraction_source: 0.0

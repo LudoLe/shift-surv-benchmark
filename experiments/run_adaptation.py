@@ -93,6 +93,7 @@ APPENDIX_SCENARIOS = [
     "prior_shift",
     "strong_covariate_shift",
     "cure_shift",
+    "censoring_shift",
 ]
 
 # Short display labels (for column headers)

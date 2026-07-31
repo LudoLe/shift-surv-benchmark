@@ -41,6 +41,7 @@ SCENARIO_NAMES = [
     "prior_shift",
     "strong_covariate_shift",
     "cure_shift",
+    "censoring_shift",
 ]
 
 
@@ -116,6 +117,8 @@ def generate_scenario(
         source_p, target_p = _prior_shift(source_params, target_id, n_per_domain)
     elif name == "strong_covariate_shift":
         source_p, target_p = _strong_covariate_shift(source_params, target_id, n_per_domain, base, seed, **kwargs)
+    elif name == "censoring_shift":
+        source_p, target_p = _censoring_shift(source_params, target_id, n_per_domain, **kwargs)
     elif name == "cure_shift":
         source_p, target_p = _cure_shift(source_params, target_id, n_per_domain, base, **kwargs)
 
@@ -701,6 +704,50 @@ def _strong_covariate_shift(
 # ---------------------------------------------------------------------------
 # Mixture cure shift
 # ---------------------------------------------------------------------------
+
+
+def _censoring_shift(
+    source_params: list[DomainParams],
+    target_id: int,
+    n: int,
+    censoring_lambda_target: float = 0.06,
+    censoring_beta_target: float = 0.8,
+) -> tuple[list[DomainParams], DomainParams]:
+    """Outcome-ascertainment shift: the target has shorter, risk-dependent follow-up.
+
+    Every other regime perturbs how patients or their covariates differ. This one
+    perturbs how the *outcome is observed*, which no other regime covers: the
+    benchmark has a measurement shift on x and nothing on y.
+
+    The true label 1[T <= tau] is unchanged in distribution -- the source and
+    target populations are identical and the outcome mechanism is untouched.
+    What changes is the recorded label y = 1[t_obs <= tau AND delta == 1], and
+    which patients have a known status at all.
+
+    This is motivated by the real cohort rather than added for completeness. In
+    I3LUNG median follow-up runs from 7.7 to 12.9 months across the six centres,
+    and the fraction of patients whose six-month status is unobserved -- and who
+    are therefore dropped from the analysis -- ranges from 0% to 17%. Centres are
+    thus compared on differently selected subsets.
+
+    censoring_beta_target makes the censoring rate depend on the latent risk,
+    rate_i = lambda_c * exp(beta * eta_i). At beta = 0 censoring is
+    administrative and the exclusion costs only sample size; at beta > 0 the
+    sicker are lost first and the exclusion selects on the outcome. That
+    distinction is the clinically interesting one and is not identifiable from
+    the recorded data, which is why it needs a simulator.
+
+    The source is left uncensored so the regime isolates the target's
+    ascertainment; a symmetric variant with both centres censored at different
+    rates is more realistic but confounds the source model's own labels.
+    """
+    target = source_params[0].copy()
+    target.domain_id = target_id
+    target.n = n
+    target.censoring_lambda = censoring_lambda_target
+    target.censoring_beta = censoring_beta_target
+    return source_params, target
+
 
 def _cure_shift(
     source_params: list[DomainParams],

@@ -108,6 +108,11 @@ class DomainParams:
     n: int = 500
     domain_id: int = -1
     censoring_lambda: float = 0.0   # Exp(λ_c) censoring rate; 0 = no censoring
+    censoring_beta: float = 0.0     # risk dependence of censoring: rate_i = λ_c·exp(β·η_i).
+                                    # 0 = administrative (independent of risk); >0 = the
+                                    # sicker are lost to follow-up first, which is what makes
+                                    # excluding unknown-status patients a biased selection
+                                    # rather than a reduction in sample size.
     # ── Mixture cure model (optional) ──────────────────────────────────────
     # cure_fraction : scalar π̄ ∈ [0, 1) — average probability of being a
     #                 long-term survivor.  0.0 = standard Weibull PH (no cure).
@@ -145,6 +150,7 @@ class DomainParams:
             n=self.n,
             domain_id=self.domain_id,
             censoring_lambda=self.censoring_lambda,
+            censoring_beta=self.censoring_beta,
             cure_fraction=self.cure_fraction,
             w_cure=self.w_cure.copy() if self.w_cure is not None else None,
             time_distribution=self.time_distribution,
