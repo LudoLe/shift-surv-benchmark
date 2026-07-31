@@ -162,8 +162,20 @@ def main() -> None:
     _TABLES.mkdir(parents=True, exist_ok=True)
     save_table_csv(rows, _TABLES / f"{args.out_prefix}_transfers.csv")
     g = np.array([r["gap"] for r in rows])
+    d = np.array([r["binary_dropped_frac_tgt"] for r in rows])
     print(f"\n  gap C-index sorgente->target: mediana {np.median(g):+.4f}  "
           f"range {g.min():+.4f} .. {g.max():+.4f}")
+    print(f"  transfer con degradazione: {int((g > 0).sum())}/{len(g)}")
+
+    # The two tests the paper quotes, computed here so the numbers trace to
+    # committed code. The second is the one that matters: if the gap tracked the
+    # fraction each centre loses to the fixed horizon, the degradation would be
+    # differential selection rather than transfer.
+    from scipy import stats
+    w = stats.wilcoxon(g)
+    rho, p_rho = stats.spearmanr(d, g)
+    print(f"  Wilcoxon (gap != 0): p={w.pvalue:.4f}")
+    print(f"  gap vs quota esclusa dal binario: Spearman rho={rho:+.3f} p={p_rho:.3f}")
     print(f"  Salvato: {_TABLES}/{args.out_prefix}_transfers.csv")
 
 
