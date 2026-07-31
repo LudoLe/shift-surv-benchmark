@@ -101,8 +101,11 @@ def load_summary(prefix: str) -> dict:
     return out
 
 
-def load_raw(prefix: str) -> dict:
-    """(scenario, method) -> list of per-seed target AUROC, for the dots."""
+def load_raw(prefix: str, field: str = "tgt_auroc") -> dict:
+    """(scenario, method) -> list of per-seed values of `field`, for the dots.
+
+    Parameterised because _gen_fig_cal.py needs tgt_ece from the same tables.
+    """
     path = os.path.join(TABLES, f"{prefix}_raw.csv")
     out = defaultdict(list)
     if not os.path.exists(path):
@@ -110,7 +113,7 @@ def load_raw(prefix: str) -> dict:
     with open(path) as fh:
         for r in csv.DictReader(fh):
             try:
-                out[(r["scenario"], r["method"])].append(float(r["tgt_auroc"]))
+                out[(r["scenario"], r["method"])].append(float(r[field]))
             except (KeyError, ValueError):
                 continue
     return out
