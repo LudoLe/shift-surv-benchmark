@@ -9,14 +9,19 @@ the fact from the twin, and ask whether the variant matching the true mechanism
 scores best.
 
 Worlds: an identity control (source == target, where every twin must report
-approximately nothing), mean-only, covariance-only, and mean-plus-covariance.
-Each is treated exactly as a real transfer would be -- its d_mean and d_cov are
+approximately nothing), mean-only, covariance-only, mean-plus-covariance, and a
+concept-shift world whose mechanism the twin cannot see at all. Each is treated
+exactly as a real transfer would be -- its d_mean and d_cov are
 measured from unlabelled covariates, the three twins are calibrated against
 those, and the effect vectors are compared.
 
 If the matching variant wins, a failure on real data is a statement about the
 real data. If it does not, the twins are exploratory and nothing about the real
 transfers follows from them.
+
+Both the fitted knobs and the effect-vector error are reported, because a twin
+can land on the right effects from the wrong configuration; only the knobs say
+whether the mechanism itself was recovered.
 
 Identifiability (--test identifiability)
 ----------------------------------------
@@ -73,6 +78,13 @@ WORLDS = {
     "mean_only":     dict(mu=1.2, cov=1.0, expect="mean_only"),
     "cov_only":      dict(mu=0.0, cov=3.0, expect="cov_only"),
     "mean_plus_cov": dict(mu=1.2, cov=3.0, expect="mean_plus_cov"),
+    # Not buildable by the twin: concept shift lives entirely in P(Y|X) and
+    # leaves the target covariates untouched, so every label-free diagnostic the
+    # twin calibrates against reads zero. Included precisely because no variant
+    # can succeed here -- it marks the boundary of what the approach can address
+    # rather than testing it, and a twin that appeared to succeed would be
+    # reading something it cannot have seen.
+    "concept":       dict(mu=None, cov=None, expect="(nessuno: non identificabile)"),
 }
 
 
@@ -135,6 +147,13 @@ def run_identifiability(n: int, seeds: list[int]) -> list[dict]:
 # Recovery
 # ---------------------------------------------------------------------------
 
+def _concept_world(seed: int, n: int):
+    """Ground-truth transfer whose mechanism is invisible to the twin."""
+    d = generate_scenario("concept_shift", n_source_domains=1, n_per_domain=n,
+                          seed=seed, base=BaseParams(seed=seed))
+    return d["source"][0], d["target"]
+
+
 def _world(spec: dict, seed: int, n_src: int, n_tgt: int, p: int):
     """A synthetic 'ground truth' transfer, built with the twin's own generator so
     that a variant matching the true mechanism could in principle reproduce it
@@ -150,7 +169,12 @@ def run_recovery(n_seeds: int, n_src: int, n_tgt: int, p: int) -> list[dict]:
     print(f"Recupero del meccanismo su mondi noti  (n {n_src}/{n_tgt}, p {p}, "
           f"{n_seeds} seed)\n")
     for wname, wspec in WORLDS.items():
-        (S, T), base_spec = _world(wspec, 0, n_src, n_tgt, p)
+        if wname == "concept":
+            S, T = _concept_world(0, max(n_src, n_tgt))
+            base_spec = dict(n_src=S.n, n_tgt=T.n, n_features=S.x.shape[1],
+                             prev_src=float(S.y.mean()), prev_tgt=float(T.y.mean()))
+        else:
+            (S, T), base_spec = _world(wspec, 0, n_src, n_tgt, p)
         a, c = _standardise(S.x, T.x)
         g = geometry(a, c)
         truth = effect_vector(S, T, seeds)
@@ -169,10 +193,18 @@ def run_recovery(n_seeds: int, n_src: int, n_tgt: int, p: int) -> list[dict]:
             nerr = sc.get("auroc_norm_error", float("nan"))
             if nerr == nerr and nerr < best_err:
                 best, best_err = variant, nerr
+            # Parameter recovery, reported separately from effect-vector error:
+            # a twin can land on the right effects from the wrong configuration,
+            # and only the knobs say whether the mechanism itself was recovered.
+            got = twin_geometry(spec, mu, cs, seeds=3)
             rows.append(dict(test="recovery", world=wname, variant=variant,
-                             expected=wspec["expect"], mu_scale=round(mu, 4),
-                             cov_scale=round(cs, 4), d_mean_world=round(g["d_mean"], 4),
-                             d_cov_world=round(g["d_cov"], 4), **sc))
+                             expected=wspec["expect"],
+                             mu_true=wspec["mu"], cov_true=wspec["cov"],
+                             mu_fitted=round(mu, 4), cov_fitted=round(cs, 4),
+                             d_mean_world=round(g["d_mean"], 4),
+                             d_cov_world=round(g["d_cov"], 4),
+                             d_mean_twin=round(got["d_mean"], 4),
+                             d_cov_twin=round(got["d_cov"], 4), **sc))
             print(f"  {variant:<14} sign {sc.get('auroc_sign_agreement', float('nan')):.2f}"
                   f"  nerr {nerr:.2f}", flush=True)
         ok = "OK " if best == wspec["expect"] else "NO "
