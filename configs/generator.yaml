@@ -67,6 +67,11 @@ scenarios:
     source_sigma_jitter: 0.1
 
   spurious_shift:           # latent u_inv<->u_spu correlation in source, broken in target
+    # rho chosen by the pre-specified pilot in experiments/pilot_spurious_rho.py:
+    # the smallest rho whose source-only spurious oracle reaches AUROC >= 0.70,
+    # measured on source data alone, on seeds disjoint from the benchmark's, and
+    # without looking at any target result. That selects 0.70 (source spurious
+    # oracle 0.7058), which is the value already in use.
     rho_source: 0.70        # cross-block correlation of latent_cov (source)
     # spu_mean_target and sigma_noise_target omitted: both inherited from the
     # source, so ONLY the cross-covariance changes. Moving mu_spu as well would
