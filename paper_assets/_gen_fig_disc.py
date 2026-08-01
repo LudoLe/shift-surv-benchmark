@@ -215,19 +215,40 @@ def draw_panel(ax, panel_key: str) -> None:
             pts = raw.get((key, m), [])
             if pts:
                 jit = (np.random.default_rng(i * 10 + j).random(len(pts)) - 0.5) * w * 0.55
-                ax.scatter(pos + jit, pts, s=5, color="#222222", alpha=0.45,
-                           zorder=6, linewidths=0)
+                ax.scatter(pos + jit, pts, s=13, facecolors="none",
+                           edgecolors=colour, linewidths=0.8, alpha=0.85,
+                           zorder=6)
 
+        # The bracket spans the two bars the test actually compared. A label
+        # floating over the whole group reads as a statement about the oracle
+        # bars too, which no test was run on.
         if key in stars:
-            top = np.nanmax([obs, lat, _f(summary.get((key, ERM)), "tgt_auroc_mean")])
-            ax.text(x[i], top + 0.022, stars[key], ha="center", va="bottom",
-                    fontsize=9, color="#333333")
+            x0, x1 = x[i] - 0.5 * w * 1.15, x[i] + 0.5 * w * 1.15
+            tops = []
+            for m in (ERM, best):
+                if m is None:
+                    continue
+                row = summary.get((key, m))
+                mn, c = _f(row, "tgt_auroc_mean"), _f(row, "tgt_auroc_ci95")
+                cand = [mn + (c if c == c else 0.0)]
+                pts = raw.get((key, m), [])
+                if pts:
+                    cand.append(max(pts))
+                tops.append(np.nanmax(cand))
+            yb = (np.nanmax(tops) if tops else 0.8) + 0.013
+            ax.plot([x0, x0, x1, x1], [yb - 0.007, yb, yb, yb - 0.007],
+                    color="#555555", lw=0.9, zorder=7, solid_capstyle="butt")
+            ax.text(x[i], yb + 0.004, stars[key], ha="center", va="bottom",
+                    fontsize=8.5, color="#333333")
 
     ax.set_xticks(x)
-    ax.set_xticklabels([lbl for _k, lbl in scen], rotation=18, ha="right")
+    ax.set_xticklabels([lbl for _k, lbl in scen], rotation=30, ha="right")
     ax.set_ylabel("Target AUROC")
-    ax.set_ylim(0.5, 0.95)
-    ax.grid(axis="y", alpha=0.25, lw=0.6)
+    ax.set_ylim(0.5, 0.90)
+    ax.set_yticks(np.arange(0.50, 0.901, 0.05))
+    ax.grid(axis="y", color="#E8E8E8", lw=0.7)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
     ax.set_axisbelow(True)
 
     ax.legend(handles=[
@@ -235,7 +256,9 @@ def draw_panel(ax, panel_key: str) -> None:
         Line2D([0], [0], color=C_LAT_ORACLE, lw=1.8, label="Latent oracle"),
         Patch(facecolor=C_ERM, label="ERM"),
         Patch(facecolor=cfg["colour"], label=cfg["family_label"]),
-    ], loc="lower left", frameon=False, fontsize=8, ncol=2)
+    ], loc="upper left", frameon=False, fontsize=7.5, ncol=2,
+       handlelength=1.4, handletextpad=0.5, columnspacing=1.0,
+       borderaxespad=0.3)
 
 
 def main() -> None:
@@ -245,7 +268,7 @@ def main() -> None:
     os.makedirs(args.outdir, exist_ok=True)
 
     for panel in ("a", "b"):
-        fig, ax = plt.subplots(figsize=(7.0, 3.1))
+        fig, ax = plt.subplots(figsize=(4.6, 4.4))
         draw_panel(ax, panel)
         fig.tight_layout()
         for ext in ("pdf", "png"):
