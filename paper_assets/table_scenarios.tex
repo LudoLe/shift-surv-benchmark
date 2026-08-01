@@ -1,20 +1,20 @@
 \begin{table}[t]
-\caption{Shift regimes, measured from the generator: each row is produced by generating the scenario and comparing the target's parameters against the source's, so the table cannot disagree with the code. Common to all regimes: $p{=}20$ observed features, $k_{\mathrm{inv}}{=}3$ and $k_{\mathrm{spu}}{=}2$ latent factors, horizon $\tau{=}6$ months, $n{=}500$ patients per center, $w{=}(1, 0.5, -0.5)$, $\lambda_0{=}0.02$, $\nu{=}1.5$, $\sigma{=}0.5$, giving a source event rate of $0.33$ at $\tau$. Spurious factors never enter the risk ($v{=}0$ throughout). \emph{Nature} separates shifts that leave the target-optimal rule recoverable from $x$ from those that do not.}
+\caption{Shift regimes, measured from the generator: each row is produced by generating the scenario and comparing the target's parameters against the source's, so the table cannot disagree with the code. Common to all regimes: $p{=}20$ observed features, $k_{\mathrm{inv}}{=}3$ and $k_{\mathrm{spu}}{=}2$ latent factors, horizon $\tau{=}6$ months, $n{=}500$ patients per center, $w{=}(1, 0.5, -0.5)$, $\lambda_0{=}0.02$, $\nu{=}1.5$, $\sigma{=}0.5$, giving a source event rate of $0.33$ at $\tau$. Spurious factors never enter the risk ($v{=}0$ throughout). \emph{Nature} separates shifts that leave the target-optimal rule recoverable from $x$ from those that do not; \emph{\#} is the number of parameter blocks that differ, and is 1 for every regime but covariate shift, whose two blocks are the invariant and spurious latent means.}
 \label{tab:scenarios}
 \centering
 \footnotesize
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{@{}lllll@{}}
+\begin{tabular}{@{}lllp{0.13\linewidth}p{0.30\linewidth}@{}}
 \toprule
-\textbf{Regime} & \textbf{Changed} & \textbf{\#} & \textbf{Nature} & \textbf{Prevalence} \\
+\textbf{Regime} & \textbf{Changed} & \textbf{\#} & \textbf{Nature} & \textbf{Clinical interpretation} \\
 \midrule
-No shift & --- & --- & --- & 0.33 $\to$ 0.33 \\
-Covariate & $\mu_{\mathrm{inv}}$, $\mu_{\mathrm{spu}}$ & 2 & invertible & 0.26 $\to$ 0.33 \\
-Measurement & $A_{\mathrm{inv}}$ & 1 & invertible & 0.26 $\to$ 0.27 \\
-Spurious & $\Sigma_{\mathrm{lat}}$ & 1 & invertible & 0.34 $\to$ 0.33 \\
-Baseline haz. & $\lambda_0$ & 1 & rank-preserving & 0.33 $\to$ 0.59 \\
-Label-prior & $P(y)$ (resampling) & 1 & $P(x\mid y)$ invariant & 0.33 $\to$ 0.60 \\
-Concept & $w$ & 1 & not transportable & 0.33 $\to$ 0.33 \\
+No shift & --- & --- & --- & Same data-generating process in source and target \\
+Covariate & $\mu_{\mathrm{inv}}$, $\mu_{\mathrm{spu}}$ & 2 & invertible & Different patient case mix or latent biological population \\
+Measurement & $A_{\mathrm{inv}}$ & 1 & invertible & Different measurement, acquisition, preprocessing or coding process \\
+Spurious & $\Sigma_{\mathrm{lat}}$ & 1 & invertible & Center-specific shortcut that does not persist after transport \\
+Baseline haz. & $\lambda_0$ & 1 & rank-preserving & Different absolute event rate or background prognosis \\
+Label-prior & $P(y)$ (resampling) & 1 & $P(x\mid y)$ invariant & Different event prevalence, class-conditional distributions preserved \\
+Concept & $w$ & 1 & not transportable & Changed relationship between predictors and outcome risk \\
 \bottomrule
 \end{tabular}
 \end{table}

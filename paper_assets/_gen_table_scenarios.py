@@ -83,6 +83,22 @@ def changed_fields(sp, tp) -> list[str]:
     return out
 
 
+# Clinical reading of each regime. Editorial rather than measured -- the rest of
+# the table is derived from the generator, this column is not -- so it is kept
+# separate from the machinery instead of being inferred from parameter names.
+CLINICAL = {
+    "no_shift": "Same data-generating process in source and target",
+    "covariate_shift": "Different patient case mix or latent biological population",
+    "observational_shift": "Different measurement, acquisition, preprocessing or "
+                           "coding process",
+    "spurious_shift": "Center-specific shortcut that does not persist after transport",
+    "baseline_hazard_shift": "Different absolute event rate or background prognosis",
+    "prior_shift": "Different event prevalence, class-conditional distributions "
+                   "preserved",
+    "concept_shift": "Changed relationship between predictors and outcome risk",
+}
+
+
 def main() -> None:
     rows, prev = [], {}
     for name, label, nature in REGIMES:
@@ -109,8 +125,7 @@ def main() -> None:
         else:
             changed_tex, n_mech = ", ".join(TEX.get(f, f) for f in ch), str(len(ch))
 
-        rows.append((label, changed_tex, n_mech, nature,
-                     f"{prev[name][0]:.2f} $\\to$ {prev[name][1]:.2f}"))
+        rows.append((label, changed_tex, n_mech, nature, CLINICAL[name]))
 
     src_prev = prev["no_shift"][0]
     lines = [
@@ -125,13 +140,15 @@ def main() -> None:
         f"giving a source event rate of ${src_prev:.2f}$ at $\\tau$. Spurious "
         r"factors never enter the risk ($v{=}0$ throughout). \emph{Nature} "
         r"separates shifts that leave the target-optimal rule recoverable from "
-        r"$x$ from those that do not.}",
+        r"$x$ from those that do not; \emph{\#} is the number of parameter "
+        r"blocks that differ, and is 1 for every regime but covariate shift, "
+        r"whose two blocks are the invariant and spurious latent means.}",
         r"\label{tab:scenarios}",
         r"\centering", r"\footnotesize",
         r"\setlength{\tabcolsep}{4pt}",
-        r"\begin{tabular}{@{}lllll@{}}", r"\toprule",
+        r"\begin{tabular}{@{}lllp{0.13\linewidth}p{0.30\linewidth}@{}}", r"\toprule",
         r"\textbf{Regime} & \textbf{Changed} & \textbf{\#} & \textbf{Nature} & "
-        r"\textbf{Prevalence} \\",
+        r"\textbf{Clinical interpretation} \\",
         r"\midrule",
     ]
     lines += [" & ".join(r) + r" \\" for r in rows]
