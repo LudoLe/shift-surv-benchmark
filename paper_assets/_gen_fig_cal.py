@@ -109,9 +109,15 @@ def draw_panel(ax, panel_key: str) -> None:
         if obs == obs:
             ax.bar(x[i], obs, width=w * 4.0, color=C_OBS_ORACLE, zorder=1,
                    edgecolor="none")
+        # Dashed, like fig_disc, because it is a level rather than a bar top.
+        # No hatched band here: on ECE the latent oracle is not a bound on what x
+        # can support -- under baseline-hazard shift it is far worse than the
+        # observed-data oracle -- so shading between them would assert something
+        # the metric does not mean.
         if lat == lat:
             ax.plot([x[i] - w * 2.0, x[i] + w * 2.0], [lat, lat],
-                    color=C_LAT_ORACLE, lw=1.8, zorder=4, solid_capstyle="butt")
+                    color=C_LAT_ORACLE, lw=1.3, ls=(0, (4, 2)), zorder=5,
+                    solid_capstyle="butt")
 
         trio = [(ERM, C_ERM),
                 (best_of_ece(summary, key, cfg["family"]), cfg["colour"]),
@@ -168,7 +174,8 @@ def draw_panel(ax, panel_key: str) -> None:
 
     ax.legend(handles=[
         Patch(facecolor=C_OBS_ORACLE, label="Observed-data target oracle"),
-        Line2D([0], [0], color=C_LAT_ORACLE, lw=1.8, label="Latent oracle"),
+        Line2D([0], [0], color=C_LAT_ORACLE, lw=1.3, ls=(0, (4, 2)),
+               label="Latent oracle"),
         Patch(facecolor=C_ERM, label="ERM"),
         Patch(facecolor=cfg["colour"], label=cfg["family_label"]),
         Patch(facecolor=C_RECAL, label="Best recalibration"),
