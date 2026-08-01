@@ -9,13 +9,13 @@ Height here is proportional to the number of methods plotted, which roughly
 halves the vertical footprint at identical width and legibility.
 
 Sources (random-effects pooled estimates produced by experiments/meta_analysis.py):
-  i3lung_meta.csv        adaptation + recalibration over the 7 centre transfers
+  i3lung_meta.csv        adaptation + recalibration
   i3lung_loco_meta.csv   IRM / GroupDRO under leave-one-centre-out (6 folds)
-  public_rotterdam_gbsg_meta.csv   registry, both directions x three horizons
+  public_rotterdam_gbsg_meta.csv   registry, both directions
 
-Note the I3LUNG panels mix two evaluation designs, k=7 for adaptation and k=6
-for the leave-one-centre-out generalization methods; this matches the text and
-the previous figure, and the caption should keep saying so.
+All three are read from the same directory, so a panel cannot mix runs. The k of
+each row is whatever meta_analysis wrote; check it against the caption rather
+than assuming, since the pooling has changed between runs.
 
 Run from repo root:
     python paper_assets/_gen_fig_realdata_panels.py
@@ -146,12 +146,16 @@ def panel(rows, tables, metric, xlabel, outfile, xlim=None, xticks=None):
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--meta_dir", default=DOWNLOADS,
+    # Defaulting to a folder outside the repo let one panel mix vintages: the
+    # I3LUNG adaptation rows were read from outputs/tables while its IRM and
+    # GroupDRO rows, and both registry panels, came from a July download. The
+    # repo is the default now; --meta_dir still overrides it deliberately.
+    ap.add_argument("--meta_dir", default=os.path.join(ROOT, "outputs", "tables"),
                     help="directory with i3lung_loco_meta.csv and the registry meta CSV")
     args = ap.parse_args()
 
     tables = {
-        "i3":   load(os.path.join(ROOT, "outputs", "tables", "i3lung_meta.csv")),
+        "i3":   load(os.path.join(args.meta_dir, "i3lung_meta.csv")),
         "loco": load(os.path.join(args.meta_dir, "i3lung_loco_meta.csv")),
         "reg":  load(os.path.join(args.meta_dir, "public_rotterdam_gbsg_meta.csv")),
     }
