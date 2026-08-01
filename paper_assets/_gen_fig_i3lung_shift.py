@@ -112,16 +112,28 @@ def _fmt(v: float) -> str:
     return s[1:] if s.startswith("0.") else s
 
 
+def _save(fig, out_base: str, panel: str) -> None:
+    for ext in ("pdf", "png"):
+        p = f"{out_base}_{panel}.{ext}"
+        fig.savefig(p, bbox_inches="tight")
+        print(f"  scritto {p}")
+    plt.close(fig)
+
+
 def make_figure(order: list[str], M: np.ndarray, prev: dict, out_base: str) -> None:
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(9.6, 3.9))
+    """Two files, not one. The panels are composed into a single float with
+    subfigure captions in the .tex, exactly as fig_disc and fig_cal are, so the
+    caption of each panel lives next to the panel rather than inside the image."""
     k = len(order)
 
     # ---- (a) MMD matrix ----
+    fig, ax1 = plt.subplots(figsize=(4.5, 3.9))
     vmax = float(M.max())
     im = ax1.imshow(M, cmap="YlOrRd", vmin=0, vmax=vmax)
     ax1.set_xticks(range(k), order, rotation=45, ha="right", fontsize=10)
     ax1.set_yticks(range(k), order, fontsize=10)
     ax1.tick_params(length=0)
+    ax1.grid(False)
     for sp in ax1.spines.values():
         sp.set_visible(False)
     for i in range(k):
@@ -133,8 +145,11 @@ def make_figure(order: list[str], M: np.ndarray, prev: dict, out_base: str) -> N
     cb = fig.colorbar(im, ax=ax1, fraction=0.046, pad=0.04)
     cb.outline.set_visible(False)
     cb.ax.tick_params(labelsize=9, length=2.5)
+    fig.tight_layout()
+    _save(fig, out_base, "a")
 
     # ---- (b) survival ----
+    fig, ax2 = plt.subplots(figsize=(4.5, 3.9))
     vals = np.array([prev[c][0] for c in order])
     ns = [prev[c][1] for c in order]
     los, his = zip(*[wilson(p, n) for p, n in zip(vals, ns)])
@@ -152,15 +167,7 @@ def make_figure(order: list[str], M: np.ndarray, prev: dict, out_base: str) -> N
     ax2.spines["right"].set_visible(False)
 
     fig.tight_layout()
-    fig.subplots_adjust(bottom=0.34)
-    for ax, lab in ((ax1, "(a)"), (ax2, "(b)")):
-        pos = ax.get_position()
-        fig.text(pos.x0 + pos.width / 2, 0.06, lab, ha="center", fontsize=11)
-    for ext in ("pdf", "png"):
-        p = f"{out_base}.{ext}"
-        fig.savefig(p)
-        print(f"  scritto {p}")
-    plt.close(fig)
+    _save(fig, out_base, "b")
 
 
 def main() -> None:
