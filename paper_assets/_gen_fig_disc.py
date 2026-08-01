@@ -35,6 +35,9 @@ import os
 from collections import defaultdict
 
 import numpy as np
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -79,12 +82,8 @@ C_ERM = "#1F6FB4"
 C_OBS_ORACLE = "#CFCFCF"
 C_LAT_ORACLE = "#4D4D4D"
 
-plt.rcParams.update({
-    "font.size": 10,
-    "axes.spines.top": False,
-    "axes.spines.right": False,
-    "figure.dpi": 150,
-})
+from _style import apply as _apply_style, finish as _finish_axes
+_apply_style()
 
 
 def load_summary(prefix: str) -> dict:

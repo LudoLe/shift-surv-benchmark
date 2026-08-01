@@ -31,6 +31,9 @@ import argparse
 import os
 
 import numpy as np
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -54,12 +57,8 @@ PANELS = {
               family_label="Best generalization", colour="#1B9E77"),
 }
 
-plt.rcParams.update({
-    "font.size": 10,
-    "axes.spines.top": False,
-    "axes.spines.right": False,
-    "figure.dpi": 150,
-})
+from _style import apply as _apply_style, finish as _finish_axes
+_apply_style()
 
 
 def best_recal(summary: dict, scenario: str) -> str | None:

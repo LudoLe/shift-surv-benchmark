@@ -28,6 +28,9 @@ import os
 from collections import defaultdict
 
 import numpy as np
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -56,14 +59,8 @@ SCENARIOS = [
     ("concept_shift",         "Concept",         "#E6B422"),
 ]
 
-plt.rcParams.update({
-    "font.size": 11,
-    "axes.spines.top": False,
-    "axes.spines.right": False,
-    "axes.labelsize": 12,
-    "legend.frameon": False,
-    "legend.fontsize": 9.5,
-})
+from _style import apply as _apply_style, finish as _finish_axes
+_apply_style()
 
 
 def raw_path(scenario: str, n: int, prior_dir: str) -> str:

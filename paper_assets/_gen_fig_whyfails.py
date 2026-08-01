@@ -28,6 +28,9 @@ import csv
 import os
 
 import numpy as np
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -53,14 +56,8 @@ SCEN_LABEL = {
 }
 SCEN_ORDER = ["covariate_shift", "observational_shift", "spurious_shift", "concept_shift"]
 
-plt.rcParams.update({
-    "font.size": 9,
-    "axes.spines.top": False,
-    "axes.spines.right": False,
-    "axes.labelsize": 9.5,
-    "legend.frameon": False,
-    "legend.fontsize": 8,
-})
+from _style import apply as _apply_style, finish as _finish_axes
+_apply_style()
 
 WIDTH_IN = 3.4
 LEFT_IN, RIGHT_IN, BOTTOM_IN, TOP_IN = 0.72, 0.12, 0.52, 0.10
