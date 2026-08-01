@@ -320,6 +320,18 @@ def _worker(job):
         os.environ[v] = "1"
     os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
     warnings.filterwarnings("ignore")
+    # DANN and CDAN rebuild a small Keras model per world, which trips the
+    # tf.function retracing warning every time. It is expected here and there is
+    # nothing to fix -- but at one warning per fit it buries the progress lines
+    # completely, so the Python-level logger is silenced too. TF_CPP_MIN_LOG_LEVEL
+    # only covers the C++ side and leaves these untouched.
+    import logging
+    logging.getLogger("tensorflow").setLevel(logging.ERROR)
+    try:
+        from absl import logging as absl_logging
+        absl_logging.set_verbosity(absl_logging.ERROR)
+    except ImportError:
+        pass
     try:
         return evaluate_world(params, seeds)
     except Exception as e:                                        # noqa: BLE001
