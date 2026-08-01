@@ -41,6 +41,7 @@ from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 
 from _gen_fig_disc import (SCENARIOS, ERM, LATENT_ORACLE, OBSERVED_ORACLE,
+                           star_of, tested_best,
                            PRIOR_PREFIX, TABLES, OUTDIR, C_ERM, C_OBS_ORACLE,
                            C_LAT_ORACLE, load_summary, load_raw, load_stars,
                            _f, best_of)
@@ -121,6 +122,7 @@ def draw_panel(ax, panel_key: str) -> None:
         trio = [(ERM, C_ERM),
                 (best_of_ece(summary, key, cfg["family"]), cfg["colour"]),
                 (best_recal(summary, key), C_RECAL)]
+        drawn = {}                       # method -> x position of its bar
         for j, (m, colour) in enumerate(trio):
             if m is None:
                 continue
@@ -129,6 +131,7 @@ def draw_panel(ax, panel_key: str) -> None:
             if mean != mean:
                 continue
             pos = x[i] + (j - 1) * w * 1.1
+            drawn[m] = pos
             ax.bar(pos, mean, width=w, color=colour, zorder=2, edgecolor="none")
             if ci == ci:
                 ax.errorbar(pos, mean, yerr=ci, fmt="none", ecolor="#333333",
@@ -140,12 +143,16 @@ def draw_panel(ax, panel_key: str) -> None:
                            edgecolors=colour, linewidths=0.8, alpha=0.85,
                            zorder=6)
 
-        if key in stars:
-            x0, x1 = x[i] - w * 1.1, x[i] + w * 1.1
+        # The bracket must span the pair the test actually compared. The
+        # max-statistic test selects the best over ALL compared methods, which is
+        # not always the recalibration: under measurement and baseline-hazard
+        # shift it is an adversarial method, and a bracket hard-coded to the
+        # recalibration bar credited that bar with another one's result.
+        winner = tested_best(stars, key)
+        if key in stars and winner in drawn:
+            x0, x1 = drawn[ERM], drawn[winner]
             tops = []
-            for m in (ERM, best_recal(summary, key)):
-                if m is None:
-                    continue
+            for m in (ERM, winner):
                 row = summary.get((key, m))
                 mn, c = _f(row, "tgt_ece_mean"), _f(row, "tgt_ece_ci95")
                 cand = [mn + (c if c == c else 0.0)]
@@ -156,8 +163,11 @@ def draw_panel(ax, panel_key: str) -> None:
             yb = (np.nanmax(tops) if tops else 0.0) + 0.012
             ax.plot([x0, x0, x1, x1], [yb - 0.006, yb, yb, yb - 0.006],
                     color="#555555", lw=0.9, zorder=7, solid_capstyle="butt")
-            ax.text(x[i], yb + 0.003, stars[key], ha="center", va="bottom",
-                    fontsize=8.5, color="#333333")
+            ax.text(0.5 * (x0 + x1), yb + 0.003, star_of(stars, key),
+                    ha="center", va="bottom", fontsize=8.5, color="#333333")
+        elif key in stars:
+            print(f"  ! {key}: il test ha scelto '{winner}', che non e' fra le "
+                  f"barre disegnate — nessuna parentesi")
 
     ax.set_xticks(x)
     ax.set_xticklabels([lbl for _k, lbl in scen], rotation=30, ha="right")

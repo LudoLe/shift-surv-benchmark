@@ -138,10 +138,22 @@ def load_stars(prefix: str, metric: str = "auroc") -> dict:
                 p = float(r["p_value"])
             except (KeyError, ValueError):
                 continue
-            out[r.get("scenario", "")] = (
-                "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "n.s."
-            )
+            star = ("***" if p < 0.001 else "**" if p < 0.01
+                    else "*" if p < 0.05 else "n.s.")
+            # The tested method is carried alongside the star. Without it a
+            # figure can only guess which bar the result belongs to, and the
+            # guess is wrong whenever the winning family is not the one the
+            # bracket was hard-coded to span.
+            out[r.get("scenario", "")] = (star, r.get("best", ""))
     return out
+
+
+def star_of(stars: dict, key: str) -> str:
+    return stars[key][0] if key in stars else ""
+
+
+def tested_best(stars: dict, key: str) -> str:
+    return stars[key][1] if key in stars else ""
 
 
 def _f(row: dict | None, key: str) -> float:
@@ -240,7 +252,7 @@ def draw_panel(ax, panel_key: str) -> None:
             yb = (np.nanmax(tops) if tops else 0.8) + 0.013
             ax.plot([x0, x0, x1, x1], [yb - 0.007, yb, yb, yb - 0.007],
                     color="#555555", lw=0.9, zorder=7, solid_capstyle="butt")
-            ax.text(x[i], yb + 0.004, stars[key], ha="center", va="bottom",
+            ax.text(0.5 * (x0 + x1), yb + 0.004, star_of(stars, key), ha="center", va="bottom",
                     fontsize=8.5, color="#333333")
 
     ax.set_xticks(x)

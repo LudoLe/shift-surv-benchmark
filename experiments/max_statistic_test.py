@@ -149,6 +149,12 @@ def main() -> None:
     ap.add_argument("--raw", default=os.path.join(REPO_TABLES, "benchmark_1s1t_iwcv_raw.csv"))
     ap.add_argument("--prior_raw", default=os.path.join(PRIOR_TABLES, "benchmark_1s1t_prior_raw.csv"))
     ap.add_argument("--out", default=None, help="CSV di output (default: <prefix>_maxstat.csv)")
+    # The multi-source panels compare ERM against IRM and GroupDRO, not against
+    # the adaptation family. Testing over methods a panel does not draw makes the
+    # star unattributable: the figure would mark a group whose winning method has
+    # no bar in it. Overriding the family keeps test and figure on the same set.
+    ap.add_argument("--adapt_methods", nargs="+", default=None, metavar="M",
+                    help=f"famiglia da confrontare con ERM (default: {ADAPT})")
     args = ap.parse_args()
 
     data = load_raw(args.raw)
@@ -157,10 +163,11 @@ def main() -> None:
     else:
         print(f"note: {args.prior_raw} not found -> label-prior omitted")
 
-    rows = run("tgt_auroc", "high", ADAPT,
+    adapt = args.adapt_methods or ADAPT
+    rows = run("tgt_auroc", "high", adapt,
                "DISCRIMINATION  --  best adaptation method vs ERM (target AUROC)",
                data, metric_name="auroc")
-    rows += run("tgt_ece", "low", RECAL + ADAPT,
+    rows += run("tgt_ece", "low", RECAL + adapt,
                 "CALIBRATION  --  best method vs ERM (target ECE, lower is better)",
                 data, metric_name="ece")
 
