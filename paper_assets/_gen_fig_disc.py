@@ -200,15 +200,6 @@ def draw_panel(ax, panel_key: str) -> None:
             ax.plot([x[i] - w * 1.62, x[i] + w * 1.62], [lat, lat],
                     color=C_LAT_ORACLE, lw=1.3, ls=(0, (4, 2)), zorder=5,
                     solid_capstyle="butt")
-            # The band between the two references is the information the observed
-            # covariates do not carry: hatched, and only drawn when it points the
-            # way its name implies. Under concept shift the latent oracle sits
-            # *below* the observed one, so there is no such band to shade and
-            # hatching the inversion would assert the opposite of what it means.
-            if obs == obs and lat > obs:
-                ax.bar(x[i], lat - obs, bottom=obs, width=w * 3.1,
-                       facecolor="none", edgecolor=C_LAT_ORACLE, hatch="////",
-                       linewidth=0.0, zorder=3, alpha=0.30)
 
         best = best_of(summary, key, cfg["family"])
         for j, (m, colour) in enumerate([(ERM, C_ERM), (best, cfg["colour"])]):
@@ -256,7 +247,7 @@ def draw_panel(ax, panel_key: str) -> None:
     ax.set_xticklabels([lbl for _k, lbl in scen], rotation=30, ha="right")
     ax.set_ylabel("Target AUROC")
     # 0.92 rather than 0.90: the legend needs clearance over the baseline-hazard
-    # band, whose latent oracle reaches 0.852. Ticks stop at 0.90 so the axis
+    # group, whose latent oracle reaches 0.852. Ticks stop at 0.90 so the axis
     # still reads in fives.
     ax.set_ylim(0.5, 0.92)
     ax.set_yticks(np.arange(0.50, 0.901, 0.05))
@@ -269,8 +260,6 @@ def draw_panel(ax, panel_key: str) -> None:
         Patch(facecolor=C_OBS_ORACLE, label="Observed-data target oracle"),
         Line2D([0], [0], color=C_LAT_ORACLE, lw=1.3, ls=(0, (4, 2)),
                label="Latent oracle"),
-        Patch(facecolor="none", edgecolor=C_LAT_ORACLE, hatch="////",
-              linewidth=0.0, alpha=0.30, label="Unavailable from $x$"),
         Patch(facecolor=C_ERM, label="ERM"),
         Patch(facecolor=cfg["colour"], label=cfg["family_label"]),
     ], loc="upper left", frameon=False, fontsize=7.5, ncol=2,
