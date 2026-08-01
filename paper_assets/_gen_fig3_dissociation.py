@@ -79,6 +79,9 @@ plt.rcParams.update({
 })
 
 
+_T9 = 2.262          # t(0.975, df=9), for the ten-seed protocol
+
+
 def load_raw(prefix: str) -> list[dict]:
     p = os.path.join(TABLES, f"{prefix}_raw.csv")
     if not os.path.exists(p):
@@ -108,8 +111,10 @@ def paired_losses(rows: list[dict]) -> dict:
             continue
         out[s] = {
             "auroc_loss": float(a.mean()), "ece_loss": float(e.mean()),
-            "auroc_se": float(a.std(ddof=1) / np.sqrt(len(a))) if len(a) > 1 else 0.0,
-            "ece_se": float(e.std(ddof=1) / np.sqrt(len(e))) if len(e) > 1 else 0.0,
+            # 95% CI, matching every other figure in the paper. t rather than
+            # 1.96 because ten seeds is not asymptotic: t(0.975, 9) = 2.262.
+            "auroc_se": float(_T9 * a.std(ddof=1) / np.sqrt(len(a))) if len(a) > 1 else 0.0,
+            "ece_se": float(_T9 * e.std(ddof=1) / np.sqrt(len(e))) if len(e) > 1 else 0.0,
             "n_seeds": len(a),
         }
     return out
@@ -180,15 +185,15 @@ def main() -> None:
 
     vals = paired_losses(load_raw(args.prefix))
     print(f"fig3_dissociation da {args.prefix}_raw.csv\n")
-    print(f"  {'regime':<24}{'AUROC loss':>14}{'ECE loss':>14}{'seed':>7}")
+    print(f"  {'regime':<24}{'AUROC loss (95% CI)':>22}{'ECE loss (95% CI)':>22}{'seed':>7}")
     order = [s for _g, (ss, _c, _l) in GROUPS.items() for s in ss] + ["no_shift"]
     for s in order:
         if s not in vals:
             print(f"  {LABELS.get(s, s):<24}{'assente':>14}")
             continue
         v = vals[s]
-        print(f"  {LABELS.get(s, s):<24}{v['auroc_loss']:>+9.4f} ±{v['auroc_se']:.4f}"
-              f"{v['ece_loss']:>+9.4f} ±{v['ece_se']:.4f}{v['n_seeds']:>7}")
+        print(f"  {LABELS.get(s, s):<24}{v['auroc_loss']:>+13.4f} ±{v['auroc_se']:.4f}"
+              f"{v['ece_loss']:>+13.4f} ±{v['ece_se']:.4f}{v['n_seeds']:>7}")
     print()
     make_figure(vals, os.path.join(args.outdir, "fig3_dissociation"))
 
