@@ -267,6 +267,23 @@ shift_amplitude:
 # generator.yaml says so on the p line). A world that violates it is not a harder
 # version of this benchmark, it is a different one, and reporting it alongside
 # the others would answer a question nobody asked.
+# The worlds mode fills the space of RAW parameter values, not of the semantic
+# targets. Sampling in target space would need a bisection per draw -- nine
+# hundred calibrations on the super-population -- so the compromise is declared
+# here rather than implied: a drawn sigma no longer corresponds to its calibrated
+# observed-AUROC once w has moved too. Every row therefore carries what it
+# achieved, and any analysis has to read those columns and not only the nominal
+# raw values.
+world_sampling_space: raw
+semantic_targets_in_worlds: diagnostic_only
+reported_achieved_per_row:
+  - erm_auroc
+  - latent_oracle_auroc
+  - obs_oracle_auroc
+  - minority_fraction
+  - concept_cos_target
+  - concept_cos
+
 constraints:
   max_k_over_p: 0.5      # k_inv + k_spu must not exceed half of p
   on_violation: resample # redraw that world rather than clamp it, so the

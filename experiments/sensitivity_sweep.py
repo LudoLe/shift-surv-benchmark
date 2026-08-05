@@ -491,6 +491,10 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
         family += ["dann", "cdan"]
     acc: dict[str, list[float]] = {k: [] for k in
                                    ["erm", "latent_oracle", "obs_oracle"] + family}
+    # Achieved, not requested: in the worlds mode the raw lambda0 was drawn, not
+    # calibrated to a prevalence, so the realised minority fraction is the only
+    # honest description of what the configuration actually was.
+    minority: list[float] = []
 
     prev_env = os.environ.get("SHIFT_SURV_CONFIG")
     try:
@@ -505,6 +509,8 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
             src, tgt = data["source"], data["target"]
             if len(np.unique(tgt.y)) < 2:
                 continue
+            _y = np.asarray(tgt.y)
+            minority.append(float(min(_y.mean(), 1.0 - _y.mean())))
             acc["erm"].append(fit_all_observed(src, tgt)["target"]["auroc"])
             acc["latent_oracle"].append(fit_invariant_oracle(src, tgt)["target"]["auroc"])
             acc["obs_oracle"].append(
@@ -551,6 +557,7 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
         "erm_auroc": round(float(np.nanmean(A["erm"])), 4),
         "latent_oracle_auroc": round(float(np.nanmean(A["latent_oracle"])), 4),
         "obs_oracle_auroc": round(float(np.nanmean(A["obs_oracle"])), 4),
+        "minority_fraction": round(float(np.mean(minority)), 4) if minority else float("nan"),
         "best_adapt": best, "best_adapt_auroc": round(means[best], 4),
         "adapt_gain": round(g_m, 4), "adapt_gain_ci95": round(g_ci, 4),
         "adapt_gain_lo": round(g_m - g_ci, 4),
