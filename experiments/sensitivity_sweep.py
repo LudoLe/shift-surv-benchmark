@@ -564,11 +564,11 @@ def _defaults(regime: str) -> dict:
 # Modes
 # ---------------------------------------------------------------------------
 
-def oat(regimes, seeds, n, n_src, with_nets) -> list[dict]:
+def oat(regimes, seeds, n, n_src, with_nets, axes=None) -> list[dict]:
     rows, t0 = [], time.time()
     jobs = []
     for r in regimes:
-        for ax in list(AXES) + ["amplitude"]:
+        for ax in (axes or (list(AXES) + ["amplitude"])):
             grid = AXES[ax]["grid"] if ax in AXES else AMPLITUDE[r]["grid"]
             for v in grid:
                 jobs.append((r, ax, v))
@@ -608,7 +608,8 @@ def _from_unit(spec, u: float):
     raise ValueError(kind)
 
 
-def worlds(regimes, seeds, n, n_src, with_nets, n_worlds, seed0) -> list[dict]:
+def worlds(regimes, seeds, n, n_src, with_nets, n_worlds, seed0,
+           world_slice: tuple[int, int] = (0, 1)) -> list[dict]:
     """Space-filling sample of joint configurations.
 
     A Latin hypercube rather than independent uniform draws: with a hundred
@@ -638,10 +639,19 @@ def worlds(regimes, seeds, n, n_src, with_nets, n_worlds, seed0) -> list[dict]:
     sample = qmc.LatinHypercube(d=d, seed=seed0).random(n_worlds)
     rng = np.random.default_rng(seed0 + 1)          # sphere directions only
 
+    # Splitting across machines takes a contiguous slice of the SAME hypercube,
+    # never a fresh one with a different seed: a different seed is a different
+    # design, and two blocks would then be exploring two different spaces while
+    # claiming to be one run. The rows are generated identically everywhere and
+    # each block simply evaluates its own range of them.
+    k, nk = world_slice
+    idx = list(range(n_worlds))[k * n_worlds // nk:(k + 1) * n_worlds // nk]
+
     rows, t0 = [], time.time()
-    print(f"  worlds: {n_worlds} mondi (Latin hypercube, {d} dimensioni) "
-          f"x {len(regimes)} regimi x {len(seeds)} seed\n")
-    for wi in range(n_worlds):
+    print(f"  worlds: {n_worlds} mondi (Latin hypercube, {d} dimensioni), "
+          f"blocco {k+1}/{nk} = mondi {idx[0] if idx else '-'}-{idx[-1] if idx else '-'}"
+          f"  x {len(regimes)} regimi x {len(seeds)} seed\n")
+    for wi in idx:
         u = sample[wi]
         cfgv = {k: _from_unit(AXES[k]["draw"], u[i]) for i, k in enumerate(scalar)}
         cfgv["w_shape"] = _draw(("sphere", None, None), rng)
@@ -791,6 +801,14 @@ if __name__ == "__main__":
     ap.add_argument("--n_source_domains", type=int, default=1)
     ap.add_argument("--n_worlds", type=int, default=100)
     ap.add_argument("--world_seed", type=int, default=12345)
+    ap.add_argument("--world_slice", default="0/1", metavar="K/N",
+                    help="valuta solo il blocco K di N dello stesso ipercubo")
+    # One-at-a-time perturbs each axis independently around the same centre, so a
+    # subset of axes is the same rows the full run would have produced. Unlike
+    # the worlds mode, splitting here needs no care: there is no shared design to
+    # keep consistent.
+    ap.add_argument("--axes", nargs="+", default=None, metavar="AXIS",
+                    help="sottoinsieme di assi per il modo oat (default: tutti)")
     # DANN and CDAN cost 3.2x, not the 30x first estimated: 129s vs 41s per
     # configuration at ten seeds. That makes them affordable where it matters and
     # unaffordable only in the mode with the most cells. Excluding them from
@@ -822,10 +840,13 @@ if __name__ == "__main__":
                        args.n_source_domains, args.with_nets,
                        args.n_confirm or PROTOCOL["n_confirm"])
     elif args.mode == "oat":
-        rows = oat(args.regimes, seeds, args.n, args.n_source_domains, args.with_nets)
+        rows = oat(args.regimes, seeds, args.n, args.n_source_domains,
+                   args.with_nets, axes=args.axes)
     else:
+        _k, _n = (int(x) for x in args.world_slice.split("/"))
         rows = worlds(args.regimes, seeds, args.n, args.n_source_domains,
-                      args.with_nets, args.n_worlds, args.world_seed)
+                      args.with_nets, args.n_worlds, args.world_seed,
+                      world_slice=(_k, _n))
     report(rows)
 
     prefix = args.out_prefix or f"sensitivity_{args.mode}_{args.n_source_domains}src"

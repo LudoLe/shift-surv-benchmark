@@ -28,7 +28,25 @@ NCORES="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 JOBS="${1:-$(( NCORES / 2 ))}"
 N_SEEDS="${2:-10}"
 (( JOBS < 1 )) && JOBS=1
-(( JOBS > 12 )) && JOBS=12
+
+# No hard cap on a big machine, but memory is the binding constraint rather than
+# cores: DANN and CDAN run on TensorFlow and every process reserves its own
+# block, so a hundred concurrent jobs is a hundred TF runtimes. If free memory is
+# readable, cap the job count at what fits with 2 GB each and say so, because a
+# run that dies at hour four from an OOM costs more than one that used half the
+# cores.
+if command -v free >/dev/null 2>&1; then
+  FREE_GB="$(free -g | awk '/^Mem:/ {print $7}')"
+  if [ -n "${FREE_GB:-}" ] && [ "$FREE_GB" -gt 0 ]; then
+    MEM_CAP=$(( FREE_GB / 2 ))
+    (( MEM_CAP < 1 )) && MEM_CAP=1
+    if (( JOBS > MEM_CAP )); then
+      echo "  nota: $JOBS job richiesti, ${FREE_GB} GB liberi -> limito a $MEM_CAP"
+      echo "        (stima 2 GB per processo TensorFlow; --no_nets ne usa molta meno)"
+      JOBS=$MEM_CAP
+    fi
+  fi
+fi
 
 # One thread per process: every job is already a whole core, and letting BLAS
 # fan out inside each of them makes twenty-four jobs fight over the same cores.
@@ -53,11 +71,36 @@ UNITS=(
   "worlds|3|--n_worlds 50"
 )
 
+# 24 jobs saturates about 24 cores. On a larger machine the limit stops being
+# the job count and becomes the size of the largest job, so WORLD_SHARDS splits
+# each worlds unit into contiguous blocks of the SAME hypercube (--world_slice).
+# Not a different seed per block: that would be a different design, and the two
+# blocks would explore two different spaces while reporting as one run.
+WORLD_SHARDS="${WORLD_SHARDS:-1}"
+
+# The one-at-a-time units are the long pole once worlds is sharded: 36
+# configurations per regime, about 108 minutes at three sources. Splitting them
+# by axis needs no care -- each axis perturbs the same centre independently, so a
+# subset produces exactly the rows the full run would have -- and brings the
+# longest job down to a handful of configurations.
+AXES_ALL=(lambda0 w_norm sigma p nu k_inv k_spu w_shape amplitude)
+OAT_BY_AXIS="${OAT_BY_AXIS:-0}"
+
 jobs_list=()
 for unit in "${UNITS[@]}"; do
   IFS='|' read -r mode nsrc extra <<< "$unit"
   for reg in "${REGIMES[@]}"; do
-    jobs_list+=("${mode}|${nsrc}|${reg}|${extra}")
+    if [ "$mode" = oat ] && [ "$OAT_BY_AXIS" = 1 ]; then
+      for ax in "${AXES_ALL[@]}"; do
+        jobs_list+=("${mode}|${nsrc}|${reg}|${extra} --axes ${ax}|ax${ax}")
+      done
+    elif [ "$mode" = worlds ] && [ "$WORLD_SHARDS" -gt 1 ]; then
+      for k in $(seq 0 $(( WORLD_SHARDS - 1 ))); do
+        jobs_list+=("${mode}|${nsrc}|${reg}|${extra} --world_slice ${k}/${WORLD_SHARDS}|w${k}")
+      done
+    else
+      jobs_list+=("${mode}|${nsrc}|${reg}|${extra}|")
+    fi
   done
 done
 
@@ -67,8 +110,8 @@ echo
 
 pids=(); names=()
 for job in "${jobs_list[@]}"; do
-  IFS='|' read -r mode nsrc reg extra <<< "$job"
-  name="sens_${mode}_${nsrc}src_${reg}"
+  IFS='|' read -r mode nsrc reg extra sfx <<< "$job"
+  name="sens_${mode}_${nsrc}src_${reg}${sfx:+_$sfx}"
   while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n 2>/dev/null || sleep 5; done
   echo "  [$(date +%T)] start  $name"
   # shellcheck disable=SC2086
@@ -97,8 +140,11 @@ for unit in "${UNITS[@]}"; do
   out="outputs/tables/sensitivity_${mode}_${nsrc}src.csv"
   shards=()
   for reg in "${REGIMES[@]}"; do
-    f="outputs/tables/sens_${mode}_${nsrc}src_${reg}.csv"
-    if [ -s "$f" ]; then shards+=("$f"); else echo "  MANCA  $f"; fi
+    for f in outputs/tables/sens_${mode}_${nsrc}src_${reg}.csv \
+             outputs/tables/sens_${mode}_${nsrc}src_${reg}_w*.csv \
+             outputs/tables/sens_${mode}_${nsrc}src_${reg}_ax*.csv; do
+      [ -s "$f" ] && shards+=("$f")
+    done
   done
   if [ ${#shards[@]} -eq 0 ]; then echo "  nessuno shard per $mode/$nsrc"; continue; fi
   head -1 "${shards[0]}" > "$out"
