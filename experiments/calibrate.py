@@ -194,6 +194,22 @@ def _w_of_norm(norm: float, shape=(1.0, 0.5, -0.5), k_inv: int = 3) -> list[floa
 # Driver
 # ---------------------------------------------------------------------------
 
+def _default_target(space: dict, name: str) -> float:
+    """The target of the level marked as the benchmark's own."""
+    hit = [lv for lv in space["calibrated_parameters"][name]["levels"]
+           if "default" in (lv.get("note") or "")]
+    if len(hit) != 1:
+        raise SystemExit(f"{name}: servono esattamente un livello 'benchmark default'")
+    return float(hit[0]["target"])
+
+
+def _bisect_quiet(space: dict, name: str, target: float, fn) -> dict:
+    lo, hi = space["calibrated_parameters"][name]["search_bracket"]
+    return calibrate_parameter(name, lo, hi, target, fn,
+                               tolerance=space["calibrated_parameters"][name]["tolerance"],
+                               verbose=False)
+
+
 def run(space_path: Path, out_path: Path, verbose: bool = True) -> dict:
     import yaml
     space = yaml.safe_load(space_path.read_text())
@@ -207,6 +223,50 @@ def run(space_path: Path, out_path: Path, verbose: bool = True) -> dict:
     d_w = [float(x) for x in gen["w"]]
     d_sigma = float(gen["sigma_noise"])
     d_wnorm = float(np.linalg.norm(d_w))
+
+    # --- Pass 0: make the default background self-consistent ------------------
+    # Each axis is calibrated with the other two held at the benchmark's raw
+    # values, so after one pass the three calibrated defaults do not jointly hit
+    # their three targets: lambda0 moves discrimination, and sigma was chosen
+    # against the uncalibrated w. Sequential calibration of interacting
+    # parameters has to be iterated, otherwise "calibrated to the targets" is not
+    # what happened. The loop converges the default triple first; every
+    # non-default level is then calibrated against that converged background, so
+    # a one-at-a-time row differs from the centre in exactly one quantity.
+    tgt_w = _default_target(space, "w_norm")
+    tgt_s = _default_target(space, "sigma")
+    tgt_l = _default_target(space, "lambda0")
+    max_passes = int(proto.get("calibration_passes", 4))
+    tol = min(space["calibrated_parameters"][k]["tolerance"] for k in ("w_norm", "sigma", "lambda0"))
+    trace = []
+    for it in range(max_passes):
+        b_w = _bisect_quiet(space, "w_norm", tgt_w,
+                            lambda v: pop.latent_oracle_auroc(d_lam, d_nu, _w_of_norm(v), d_sigma))
+        d_w, d_wnorm = _w_of_norm(b_w["value"]), b_w["value"]
+        b_s = _bisect_quiet(space, "sigma", tgt_s,
+                            lambda v: pop.observed_oracle_auroc(d_lam, d_nu, d_w, v))
+        d_sigma = b_s["value"]
+        b_l = _bisect_quiet(space, "lambda0", tgt_l,
+                            lambda v: pop.event_prevalence(v, d_nu, d_w, d_sigma))
+        d_lam = b_l["value"]
+        # Residuals re-measured at the CURRENT triple, not at the one each
+        # bisection saw, which is the whole point of iterating.
+        ach = {"w_norm": pop.latent_oracle_auroc(d_lam, d_nu, d_w, d_sigma),
+               "sigma": pop.observed_oracle_auroc(d_lam, d_nu, d_w, d_sigma),
+               "lambda0": pop.event_prevalence(d_lam, d_nu, d_w, d_sigma)}
+        res = {"w_norm": abs(ach["w_norm"] - tgt_w), "sigma": abs(ach["sigma"] - tgt_s),
+               "lambda0": abs(ach["lambda0"] - tgt_l)}
+        trace.append({"pass": it + 1, "w_norm": d_wnorm, "sigma": d_sigma,
+                      "lambda0": d_lam, **{f"achieved_{k}": v for k, v in ach.items()},
+                      **{f"residual_{k}": v for k, v in res.items()}})
+        if verbose:
+            print(f"    pass {it+1}: |w|={d_wnorm:.4f} sigma={d_sigma:.4f} lam={d_lam:.5f}"
+                  f"   residui  w={res['w_norm']:.4f} s={res['sigma']:.4f} l={res['lambda0']:.4f}")
+        if max(res.values()) <= tol:
+            break
+    if verbose:
+        print(f"    background convergente dopo {len(trace)} passate "
+              f"(tolleranza {tol})\n")
 
     results: dict = {"lambda0": [], "w_norm": [], "sigma": []}
 
@@ -257,8 +317,9 @@ def run(space_path: Path, out_path: Path, verbose: bool = True) -> dict:
     out = {
         "calibrated_on": {
             "superpopulation_n": pop.n, "superpopulation_seed": pop.seed,
-            "background": {"lambda0": d_lam, "nu": d_nu, "w": d_w,
+            "background": {"lambda0": d_lam, "nu": d_nu, "w": [float(x) for x in d_w],
                            "sigma": d_sigma, "w_norm": d_wnorm},
+            "convergence_trace": trace,
         },
         "calibrated": results,
     }

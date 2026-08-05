@@ -177,6 +177,17 @@ _SPACE_PATH = _ROOT / "configs" / "parameter_space.yaml"
 _CALIB_PATH = _ROOT / "configs" / "parameter_space_calibrated.yaml"
 
 
+# The generator's own values: what the paper actually ran.
+_BENCH_RAW = {}
+
+
+def _bench_raw() -> dict:
+    g = yaml.safe_load((_ROOT / "configs" / "generator.yaml").read_text())["domain_defaults"]
+    return {"lambda0": float(g["lambda0"]),
+            "sigma": float(g["sigma_noise"]),
+            "w_norm": float(np.linalg.norm(np.asarray(g["w"], dtype=float)))}
+
+
 def _require_default(name: str, levels: list[dict]):
     """The level marked as the benchmark's own, or a hard failure.
 
@@ -189,10 +200,12 @@ def _require_default(name: str, levels: list[dict]):
         raise SystemExit(
             f"parameter_space.yaml: '{name}' ha {len(hit)} livelli marcati "
             "'benchmark default', ne serve esattamente uno")
-    return hit[0]["value"]
+    return hit[0].get("target", hit[0].get("value"))
 
 
 def _load_space() -> tuple[dict, dict, dict]:
+    global _BENCH_RAW
+    _BENCH_RAW = _bench_raw()
     """Return (AXES, AMPLITUDE, meta) built from the frozen + calibrated files."""
     if not _CALIB_PATH.exists():
         raise SystemExit(
@@ -212,9 +225,24 @@ def _load_space() -> tuple[dict, dict, dict]:
         if not good:
             raise SystemExit(f"nessun livello calibrato per {name}: ricalibra")
         grid = [float(r["value"]) for r in good]
+        # Swap the calibrated default for the benchmark's raw value, so the grid
+        # and the centre agree and `is_default` matches on identity.
+        _raw = _bench_raw().get(name)
+        if _raw is not None:
+            _i = min(range(len(good)),
+                     key=lambda k: abs(good[k]["target"] - _require_default(name, good)))
+            grid[_i] = _raw
         axes[name] = dict(
             grid=grid,
-            default=float(_require_default(name, good)),
+            # The centre of the one-at-a-time design is the benchmark's own raw
+            # value, not the calibrated one. They differ slightly -- calibration
+            # lands sigma at 0.468 for the same observed-oracle target the
+            # benchmark's 0.5 achieves -- and a centre that is merely near the
+            # benchmark answers a question nobody asked. Off-centre levels stay
+            # calibrated, so a row differs from the benchmark in exactly one
+            # semantic quantity; the benchmark's own achieved semantics are
+            # measured and reported rather than assumed.
+            default=float(_BENCH_RAW[name]),
             draw=("log", min(grid), max(grid)),
             semantic={float(r["value"]): (r["target"], r["achieved"], r["tag"]) for r in good},
             controls=space["calibrated_parameters"][name]["controls"],
@@ -754,11 +782,29 @@ if __name__ == "__main__":
     ap.add_argument("--n_source_domains", type=int, default=1)
     ap.add_argument("--n_worlds", type=int, default=100)
     ap.add_argument("--world_seed", type=int, default=12345)
-    ap.add_argument("--with_nets", action="store_true")
+    # DANN and CDAN cost 3.2x, not the 30x first estimated: 129s vs 41s per
+    # configuration at ten seeds. That makes them affordable where it matters and
+    # unaffordable only in the mode with the most cells. Excluding them from
+    # every mode would narrow the claim from "standard unsupervised adaptation"
+    # to "CORAL and importance weighting", which is a different paper.
+    #
+    #   oat      included -- the main-effect table is what gets reported
+    #   worlds   excluded -- 600 cells; the coverage search stays cheap
+    #   confirm  included -- a candidate is only worth reporting once the full
+    #                        suite has had its chance at it on fresh seeds
+    #
+    # The text has to say that the global coverage search used the reduced
+    # family. --with_nets / --no_nets override the per-mode default.
+    ap.add_argument("--with_nets", dest="with_nets", action="store_true", default=None)
+    ap.add_argument("--no_nets", dest="with_nets", action="store_false")
     ap.add_argument("--out_prefix", default=None)
     args = ap.parse_args()
 
     seeds = list(range(args.n_seeds))
+    if args.with_nets is None:
+        args.with_nets = args.mode in ("oat", "confirm")
+    print(f"\n  modalita' {args.mode}, {args.n_source_domains} sorgente/i, "
+          f"famiglia {'con' if args.with_nets else 'senza'} DANN/CDAN")
     t0 = time.time()
     if args.mode == "confirm":
         srcs = args.confirm_from or [str(_TABLES / f"sensitivity_{m}_{args.n_source_domains}src.csv")

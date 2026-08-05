@@ -54,6 +54,69 @@ reference_cohorts:
     therefore partial on the low side and extended on the high side as stress.
 
 # ---- Continuous parameters, declared by semantic target ---------------------
+#
+# Reading the two AUROC axes together. The latent-oracle targets (0.70-0.97) and
+# the observed-oracle targets (0.78-0.60) belong to DIFFERENT axes and are never
+# combined: each is calibrated with the other parameters at the benchmark's own
+# values, and the one-at-a-time design moves one axis at a time. Reading "latent
+# 0.70" against "observed 0.78" as a single configuration is therefore a category
+# error -- that configuration does not exist in the design.
+#
+# Measured on the super-population across the whole grid, the observed-data
+# oracle stays below the latent oracle everywhere, as it must here: under
+# no_shift the spurious factors are independent of the invariant ones and do not
+# enter eta, so x carries no information about y beyond what u_inv carries.
+#
+#   ||w||   sigma   latent   observed
+#   0.655   0.500   0.7025   0.6804
+#   0.655   2.653   0.7025   0.5711
+#   1.225   0.500   0.8237   0.7835     <- the benchmark
+#   1.225   2.653   0.8237   0.6075
+#   1.952   0.500   0.9034   0.8486
+#   4.050   0.500   0.9706   0.8997
+#
+# The ordering can invert inside the benchmark itself -- under concept shift the
+# source-fitted latent oracle falls below the observed-data oracle, and the paper
+# reports the sign of that gap as diagnostic. That is a property of a shifted
+# outcome mechanism, not of this calibration, which runs on no_shift.
+#
+# One more distinction the two modes do not share. In the one-at-a-time mode each
+# level IS a semantic target: it was calibrated to it against the benchmark
+# background. In the worlds mode the axes are drawn jointly between the extremes
+# of those calibrated grids, so a drawn sigma no longer corresponds to its
+# calibrated observed-AUROC once w has also moved. There the achieved quantities
+# are diagnostics to be reported, not targets that were hit.
+#
+# Reading the two AUROC axes together. The latent-oracle targets (0.70-0.97) and
+# the observed-oracle targets (0.78-0.60) belong to DIFFERENT axes and are never
+# combined: each is calibrated with the other parameters at the benchmark's own
+# values, and the one-at-a-time design moves one axis at a time. Reading "latent
+# 0.70" against "observed 0.78" as one configuration is a category error -- that
+# configuration does not exist in the design.
+#
+# Measured on the super-population across the whole grid, the observed-data
+# oracle stays below the latent oracle everywhere, as it must here: under
+# no_shift the spurious factors are independent of the invariant ones and never
+# enter eta, so x carries nothing about y beyond what u_inv carries.
+#
+#   ||w||   sigma   latent   observed
+#   0.655   0.500   0.7025   0.6804
+#   1.225   0.500   0.8237   0.7835     <- the benchmark
+#   1.225   2.653   0.8237   0.6075
+#   1.952   0.500   0.9034   0.8486
+#   4.050   0.500   0.9706   0.8997
+#
+# The ordering can invert inside the benchmark itself -- under concept shift the
+# source-fitted latent oracle falls below the observed-data oracle, and the paper
+# reports the sign of that gap as diagnostic. That belongs to a shifted outcome
+# mechanism, not to this calibration, which runs on no_shift.
+#
+# What the two modes do not share. In the one-at-a-time mode each level IS a
+# semantic target, calibrated to it against the benchmark background, and the
+# centre is the benchmark's own raw values. In the worlds mode the axes are drawn
+# jointly between the extremes of those calibrated grids, so a drawn sigma no
+# longer corresponds to its calibrated observed-AUROC once w has moved too. There
+# the achieved quantities are diagnostics to report, not targets that were hit.
 calibrated_parameters:
 
   lambda0:
@@ -185,7 +248,10 @@ protocol:
   n_worlds_1src: 100
   n_worlds_3src: 50
   n_confirm: 20                # how many top-gain configurations get re-run
-  superpopulation_n: 20000     # fixed population used only for calibration
+  calibration_passes: 4        # sequential calibration of interacting targets is iterated
+  # 20000 gave a Monte-Carlo error on AUROC comparable to the 0.005 tolerance at
+  # the 0.90-0.97 targets, so the bisection was chasing noise there.
+  superpopulation_n: 100000    # fixed population used only for calibration
   superpopulation_seed: 999
   decision_rule:
     supported:      "gain 95% upper limit < margin"
