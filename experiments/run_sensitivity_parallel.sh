@@ -136,7 +136,7 @@ WORLD_SHARDS="${WORLD_SHARDS:-1}"
 # by axis needs no care -- each axis perturbs the same centre independently, so a
 # subset produces exactly the rows the full run would have -- and brings the
 # longest job down to a handful of configurations.
-AXES_ALL=(lambda0 w_norm sigma p nu k_inv k_spu w_shape amplitude)
+AXES_ALL=(lambda0 w_norm sigma n_per_domain p nu k_inv k_spu w_shape amplitude)
 OAT_BY_AXIS="${OAT_BY_AXIS:-0}"
 
 jobs_list=()

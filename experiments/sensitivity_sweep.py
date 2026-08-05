@@ -290,6 +290,7 @@ AXES, AMPLITUDE, SPACE = _load_space()
 MARGIN = float(SPACE["meta"]["margin_auroc"])
 HEADROOM_MIN = float(SPACE["meta"]["headroom_threshold"])
 PROTOCOL = SPACE["protocol"]
+MAX_K_OVER_P = float(SPACE.get("constraints", {}).get("max_k_over_p", 0.5))
 _CONCEPT_CHOICES = [tuple(lv["value"]) for lv
                     in SPACE["shift_amplitude"]["concept_shift"]["levels"]]
 
@@ -430,6 +431,9 @@ def _kwargs_for(regime: str, cfgv: dict) -> tuple[dict, dict]:
 
 def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
               n_src: int, with_nets: bool) -> dict:
+    # n is an axis now, so the configuration wins over the runner default; the
+    # --n flag stays as the centre of that axis.
+    n = int(cfgv.get("n_per_domain", n))
     from experiments.baselines import (
         fit_all_observed, fit_invariant_oracle, fit_observed_target_oracle)
     from experiments.adaptation_methods import fit_coral, fit_iw_erm
@@ -545,6 +549,10 @@ def _verdict(gain: float, gain_ci: float, headroom: float) -> str:
 def _flat(cfgv: dict) -> dict:
     out = {k: (cfgv[k] if k != "w_shape" else
                (cfgv[k] if isinstance(cfgv[k], str) else "sphere")) for k in AXES}
+    # Recorded per row: a world whose k had to be reduced to stay inside the
+    # overcompleteness assumption is not quite the world the hypercube drew, and
+    # a reader comparing rows should be able to see which ones were adjusted.
+    out["k_clamped"] = cfgv.get("k_clamped", 0)
     out["amplitude"] = str(cfgv.get("amplitude"))
     w = _w_vector(cfgv["w_shape"], float(cfgv["w_norm"]), int(cfgv["k_inv"]))
     out["w"] = "[" + ",".join(f"{x:.3f}" for x in w) + "]"
@@ -655,6 +663,21 @@ def worlds(regimes, seeds, n, n_src, with_nets, n_worlds, seed0,
         u = sample[wi]
         cfgv = {k: _from_unit(AXES[k]["draw"], u[i]) for i, k in enumerate(scalar)}
         cfgv["w_shape"] = _draw(("sphere", None, None), rng)
+        # The benchmark assumes an overcomplete observation, p >> k_inv + k_spu.
+        # A joint draw can leave that region -- k=(5,4) with p=10 gives a 10x9
+        # loading matrix -- and such a world is not a harder version of this
+        # benchmark but a different one. Clamp k rather than drop the world, so
+        # the hypercube keeps all its rows and only the offending coordinate
+        # moves; the adjustment is recorded per row.
+        cfgv["k_clamped"] = 0
+        while cfgv["k_inv"] + cfgv["k_spu"] > MAX_K_OVER_P * cfgv["p"]:
+            if cfgv["k_spu"] > 1:
+                cfgv["k_spu"] -= 1
+            elif cfgv["k_inv"] > 2:
+                cfgv["k_inv"] -= 1
+            else:
+                break
+            cfgv["k_clamped"] = 1
         for r in regimes:
             c = dict(cfgv)
             # Fixed column per regime, by its position in REGIMES rather than in

@@ -159,6 +159,20 @@ calibrated_parameters:
 # ---- Parameters used directly, with no calibration needed ------------------
 direct_parameters:
 
+  n_per_domain:
+    controls: patients_per_centre
+    # n was a protocol constant, which left p/n varying only through p. That is
+    # the quantity governing overfitting, and EPV depends on n as well, so two of
+    # the three quantities that determine whether a centre is data-starved were
+    # being moved and the third was not. Figure 8 already sweeps n alone with
+    # everything else at its default; this is the same grid, so the two connect,
+    # but here it moves jointly with the rest.
+    levels:
+      - {value: 250,  tag: realism, note: "at the smallest I3LUNG centre (n=191)"}
+      - {value: 500,  tag: realism, note: "benchmark default; middle of the real range"}
+      - {value: 1000, tag: realism, note: "above the largest I3LUNG centre (n=668)"}
+      - {value: 2000, tag: stress,  note: "registry scale (Rotterdam n=2894)"}
+
   p:
     controls: observed_dimension
     levels:
@@ -238,8 +252,21 @@ shift_amplitude:
              {value: [0, 1, 2], tag: stress,  note: "cosine -1, full reversal"}]
 
 # ---- Protocol, fixed before the sweep --------------------------------------
+# ---- Constraints on joint draws -------------------------------------------
+# The one-at-a-time design moves one axis around a valid centre and cannot leave
+# the valid region. The worlds mode draws every axis at once and can: k_inv=5
+# with k_spu=4 and p=10 gives a 10x9 loading matrix, and the benchmark's premise
+# is that the observation is OVERCOMPLETE, p >> k_inv + k_spu (configs/
+# generator.yaml says so on the p line). A world that violates it is not a harder
+# version of this benchmark, it is a different one, and reporting it alongside
+# the others would answer a question nobody asked.
+constraints:
+  max_k_over_p: 0.5      # k_inv + k_spu must not exceed half of p
+  on_violation: resample # redraw that world rather than clamp it, so the
+                         # hypercube's stratification survives
+
 protocol:
-  n_per_domain: 500
+  n_per_domain: 500      # centre of the n_per_domain axis
   screening_seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   # Disjoint from the screening seeds, so a confirmed break is not the same
   # noise that produced the candidate.
