@@ -788,13 +788,10 @@ if __name__ == "__main__":
     # every mode would narrow the claim from "standard unsupervised adaptation"
     # to "CORAL and importance weighting", which is a different paper.
     #
-    #   oat      included -- the main-effect table is what gets reported
-    #   worlds   excluded -- 600 cells; the coverage search stays cheap
-    #   confirm  included -- a candidate is only worth reporting once the full
-    #                        suite has had its chance at it on fresh seeds
-    #
-    # The text has to say that the global coverage search used the reduced
-    # family. --with_nets / --no_nets override the per-mode default.
+    # They are now included in every mode. Excluding them from the coverage
+    # search would have forced the text to say that global robustness was checked
+    # only for the cheap subset, which is a weaker claim than the one the paper
+    # makes. --no_nets restores the reduced family where the budget requires it.
     ap.add_argument("--with_nets", dest="with_nets", action="store_true", default=None)
     ap.add_argument("--no_nets", dest="with_nets", action="store_false")
     ap.add_argument("--out_prefix", default=None)
@@ -802,7 +799,7 @@ if __name__ == "__main__":
 
     seeds = list(range(args.n_seeds))
     if args.with_nets is None:
-        args.with_nets = args.mode in ("oat", "confirm")
+        args.with_nets = True
     print(f"\n  modalita' {args.mode}, {args.n_source_domains} sorgente/i, "
           f"famiglia {'con' if args.with_nets else 'senza'} DANN/CDAN")
     t0 = time.time()
