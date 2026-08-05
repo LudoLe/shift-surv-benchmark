@@ -627,8 +627,14 @@ def worlds(regimes, seeds, n, n_src, with_nets, n_worlds, seed0) -> list[dict]:
     """
     from scipy.stats import qmc
 
+    # The hypercube is always built over ALL regimes, never over the subset being
+    # run. Its dimension is 8 + len(REGIMES), so sizing it to the requested
+    # regimes would give a different design -- and therefore different worlds --
+    # every time the run is split. Splitting by regime across machines is exactly
+    # how this gets parallelised, and a world has to mean the same thing in every
+    # shard or "all regimes inside one world" is not what happened.
     scalar = [k for k in AXES if AXES[k]["draw"][0] != "sphere"]
-    d = len(scalar) + len(regimes)
+    d = len(scalar) + len(REGIMES)
     sample = qmc.LatinHypercube(d=d, seed=seed0).random(n_worlds)
     rng = np.random.default_rng(seed0 + 1)          # sphere directions only
 
@@ -639,9 +645,12 @@ def worlds(regimes, seeds, n, n_src, with_nets, n_worlds, seed0) -> list[dict]:
         u = sample[wi]
         cfgv = {k: _from_unit(AXES[k]["draw"], u[i]) for i, k in enumerate(scalar)}
         cfgv["w_shape"] = _draw(("sphere", None, None), rng)
-        for ri, r in enumerate(regimes):
+        for r in regimes:
             c = dict(cfgv)
-            c["amplitude"] = _from_unit(AMPLITUDE[r]["draw"], u[len(scalar) + ri])
+            # Fixed column per regime, by its position in REGIMES rather than in
+            # the requested subset, for the same reason.
+            c["amplitude"] = _from_unit(AMPLITUDE[r]["draw"],
+                                        u[len(scalar) + REGIMES.index(r)])
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 row = _evaluate(r, c, seeds, n, n_src, with_nets)
