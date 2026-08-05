@@ -98,6 +98,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 import numpy as np
+import yaml
 from scipy import stats as sp_stats
 
 from generator.parameters import BaseParams
@@ -158,19 +159,91 @@ W_SHAPES = {
     "asymmetric":   [1.0, 0.8, -0.2],    # no symmetry between the subordinates
 }
 
-AXES = {
-    "k_inv":  dict(grid=[2, 3, 4, 5],            default=3,    draw=("int", 2, 5)),
-    "k_spu":  dict(grid=[1, 2, 3, 4],            default=2,    draw=("int", 1, 4)),
-    "p":      dict(grid=[10, 20, 40, 80],        default=20,   draw=("logint", 10, 80)),
-    "sigma":  dict(grid=[0.25, 0.5, 1.0, 2.0],   default=0.5,  draw=("log", 0.2, 2.0)),
-    "lambda0": dict(grid=[0.01, 0.02, 0.035, 0.05], default=0.02, draw=("log", 0.01, 0.05)),
-    "nu":     dict(grid=[0.7, 1.0, 1.5, 2.5],    default=1.5,  draw=("lin", 0.7, 2.5)),
-    "w_norm": dict(grid=[0.5 * W_NORM_BENCH, W_NORM_BENCH,
-                         2.0 * W_NORM_BENCH, 3.0 * W_NORM_BENCH],
-                   default=W_NORM_BENCH,         draw=("log", 0.4, 4.0)),
-    "w_shape": dict(grid=list(W_SHAPES),         default="benchmark",
-                    draw=("sphere", None, None)),
-}
+
+# ---------------------------------------------------------------------------
+# The frozen space, loaded rather than hardcoded
+# ---------------------------------------------------------------------------
+# Grids are no longer written here. They come from configs/parameter_space.yaml,
+# which declares each continuous parameter by the quantity it controls, and from
+# configs/parameter_space_calibrated.yaml, which holds the raw value that
+# bisection found for each declared target on the fixed super-population. Any
+# grid written in this file would be a second, undeclared design decision, and
+# the whole point of freezing the space is that there is only one.
+#
+# The worlds mode samples inside the frozen space rather than from a separate
+# range: each axis is drawn between the extremes of its own calibrated grid.
+
+_SPACE_PATH = _ROOT / "configs" / "parameter_space.yaml"
+_CALIB_PATH = _ROOT / "configs" / "parameter_space_calibrated.yaml"
+
+
+def _load_space() -> tuple[dict, dict, dict]:
+    """Return (AXES, AMPLITUDE, meta) built from the frozen + calibrated files."""
+    if not _CALIB_PATH.exists():
+        raise SystemExit(
+            f"manca {_CALIB_PATH.name}.\n"
+            "Lancia prima:  python -m experiments.calibrate")
+    space = yaml.safe_load(_SPACE_PATH.read_text())
+    calib = yaml.safe_load(_CALIB_PATH.read_text())["calibrated"]
+
+    axes: dict = {}
+
+    # Calibrated axes: the grid is the set of raw values bisection produced, and
+    # each carries the target it was calibrated to, so a row can be reported in
+    # semantic terms rather than as a raw number.
+    for name, rows in calib.items():
+        good = [r for r in rows if r.get("bracketed", True)
+                and not np.isnan(r.get("value", float("nan")))]
+        if not good:
+            raise SystemExit(f"nessun livello calibrato per {name}: ricalibra")
+        grid = [float(r["value"]) for r in good]
+        axes[name] = dict(
+            grid=grid,
+            default=float(next(r["value"] for r in good if "default" in (r.get("note") or "")
+                               ) if any("default" in (r.get("note") or "") for r in good)
+                          else grid[1] if len(grid) > 1 else grid[0]),
+            draw=("log", min(grid), max(grid)),
+            semantic={float(r["value"]): (r["target"], r["achieved"], r["tag"]) for r in good},
+            controls=space["calibrated_parameters"][name]["controls"],
+        )
+
+    # Direct axes: values used as declared, no calibration needed.
+    for name, spec in space["direct_parameters"].items():
+        vals = [lv["value"] for lv in spec["levels"]]
+        dflt = next((lv["value"] for lv in spec["levels"]
+                     if "default" in (lv.get("note") or "")), vals[len(vals) // 2])
+        if name == "w_shape":
+            draw = ("sphere", None, None)
+        elif all(isinstance(v, int) for v in vals):
+            draw = ("int", min(vals), max(vals))
+        else:
+            draw = ("lin", min(vals), max(vals))
+        axes[name] = dict(grid=vals, default=dflt, draw=draw,
+                          semantic={v: (None, None, lv["tag"])
+                                    for v, lv in zip(vals, spec["levels"])},
+                          controls=spec["controls"])
+
+    amplitude: dict = {}
+    for regime, spec in space["shift_amplitude"].items():
+        vals = [lv["value"] for lv in spec["levels"]]
+        vals = [tuple(v) if isinstance(v, list) else v for v in vals]
+        dflt = next((tuple(lv["value"]) if isinstance(lv["value"], list) else lv["value"]
+                     for lv in spec["levels"] if "default" in (lv.get("note") or "")),
+                    vals[len(vals) // 2])
+        draw = (("choice", None, None) if spec["kwarg"] == "w_flip_indices"
+                else ("lin", min(vals), max(vals)))
+        amplitude[regime] = dict(kwarg=spec["kwarg"], grid=vals, default=dflt, draw=draw,
+                                 semantic={v: (None, None, lv["tag"])
+                                           for v, lv in zip(vals, spec["levels"])})
+    return axes, amplitude, space
+
+
+AXES, AMPLITUDE, SPACE = _load_space()
+MARGIN = float(SPACE["meta"]["margin_auroc"])
+HEADROOM_MIN = float(SPACE["meta"]["headroom_threshold"])
+PROTOCOL = SPACE["protocol"]
+_CONCEPT_CHOICES = [tuple(lv["value"]) for lv
+                    in SPACE["shift_amplitude"]["concept_shift"]["levels"]]
 
 
 def _w_vector(shape, norm: float, k_inv: int) -> list[float]:
@@ -182,7 +255,14 @@ def _w_vector(shape, norm: float, k_inv: int) -> list[float]:
     the generator's own truncation would otherwise change the norm silently when
     k_inv < 3.
     """
-    v = np.asarray(W_SHAPES[shape] if isinstance(shape, str) else shape, dtype=float)
+    if isinstance(shape, str):
+        if shape not in W_SHAPES:
+            raise KeyError(
+                f"w_shape {shape!r} non e' una forma dichiarata. In modalita' worlds "
+                "la direzione e' un punto sulla sfera e va ricostruita dalla colonna "
+                "'w' del CSV, non dal nome: vedi confirm().")
+        shape = W_SHAPES[shape]
+    v = np.asarray(shape, dtype=float)
     if len(v) < k_inv:
         v = np.pad(v, (0, k_inv - len(v)))
     v = v[:k_inv]
@@ -190,28 +270,6 @@ def _w_vector(shape, norm: float, k_inv: int) -> list[float]:
     if nv < 1e-12:                      # truncation emptied it; fall back to e_0
         v = np.zeros(k_inv); v[0] = 1.0; nv = 1.0
     return [float(x) for x in v / nv * norm]
-
-# Each regime's own severity knob, with the kwarg it maps to.
-AMPLITUDE = {
-    "covariate_shift":      dict(kwarg="mu_inv_shift_scale",
-                                 grid=[0.5, 1.0, 1.5, 2.5], default=1.5,
-                                 draw=("lin", 0.5, 3.0)),
-    "observational_shift":  dict(kwarg="a_inv_rotation_angle_deg",
-                                 grid=[30, 45, 60, 75], default=60,
-                                 draw=("lin", 20, 85)),
-    "spurious_shift":       dict(kwarg="rho_source",
-                                 grid=[0.5, 0.7, 0.9], default=0.7,
-                                 draw=("lin", 0.4, 0.95)),
-    "baseline_hazard_shift": dict(kwarg="lambda0_target",
-                                 grid=[0.03, 0.06, 0.12], default=0.06,
-                                 draw=("log", 0.03, 0.15)),
-    "prior_shift":          dict(kwarg="prevalence_target",
-                                 grid=[0.45, 0.60, 0.75], default=0.60,
-                                 draw=("lin", 0.40, 0.80)),
-    "concept_shift":        dict(kwarg="w_flip_indices",
-                                 grid=[(2,), (1, 2), (0,), (0, 1, 2)], default=(1, 2),
-                                 draw=("choice", None, None)),
-}
 
 
 def _draw(spec, rng):
@@ -225,7 +283,7 @@ def _draw(spec, rng):
     if kind == "lin":
         return float(rng.uniform(lo, hi))
     if kind == "choice":
-        return [(2,), (1, 2), (0,), (0, 1, 2)][int(rng.integers(0, 4))]
+        return _CONCEPT_CHOICES[int(rng.integers(0, len(_CONCEPT_CHOICES)))]
     if kind == "sphere":
         # Direction drawn uniformly on the unit sphere: a standard normal vector
         # normalised. Length 5 covers the largest k_inv in the grid; _w_vector
@@ -473,34 +531,148 @@ def oat(regimes, seeds, n, n_src, with_nets) -> list[dict]:
     return rows
 
 
+def _from_unit(spec, u: float):
+    """Map u in [0,1] to a parameter value, so a Latin hypercube can drive every
+    axis through the same interface the random draws use."""
+    kind, lo, hi = spec
+    if kind == "int":
+        return int(min(hi, lo + int(u * (hi - lo + 1))))
+    if kind == "logint":
+        return int(round(np.exp(np.log(lo) + u * (np.log(hi) - np.log(lo)))))
+    if kind == "log":
+        return float(np.exp(np.log(lo) + u * (np.log(hi) - np.log(lo))))
+    if kind == "lin":
+        return float(lo + u * (hi - lo))
+    if kind == "choice":
+        return _CONCEPT_CHOICES[min(len(_CONCEPT_CHOICES) - 1,
+                                    int(u * len(_CONCEPT_CHOICES)))]
+    raise ValueError(kind)
+
+
 def worlds(regimes, seeds, n, n_src, with_nets, n_worlds, seed0) -> list[dict]:
-    rng = np.random.default_rng(seed0)
+    """Space-filling sample of joint configurations.
+
+    A Latin hypercube rather than independent uniform draws: with a hundred
+    points in eight dimensions, independent sampling leaves large parts of each
+    marginal empty by chance, and the whole reason for this mode is coverage. The
+    hypercube stratifies every axis, so each of the hundred worlds sits in its
+    own slice of every marginal.
+
+    The direction of w is the exception. It is a point on a sphere, not a scalar,
+    so it keeps its own uniform draw; stratifying a direction through one
+    hypercube column would not be uniform on the sphere.
+
+    One extra column per regime carries that regime's amplitude, so severity is
+    stratified alongside the generator parameters rather than resampled
+    independently inside the loop.
+    """
+    from scipy.stats import qmc
+
+    scalar = [k for k in AXES if AXES[k]["draw"][0] != "sphere"]
+    d = len(scalar) + len(regimes)
+    sample = qmc.LatinHypercube(d=d, seed=seed0).random(n_worlds)
+    rng = np.random.default_rng(seed0 + 1)          # sphere directions only
+
     rows, t0 = [], time.time()
-    print(f"  worlds: {n_worlds} mondi x {len(regimes)} regimi x {len(seeds)} seed\n")
+    print(f"  worlds: {n_worlds} mondi (Latin hypercube, {d} dimensioni) "
+          f"x {len(regimes)} regimi x {len(seeds)} seed\n")
     for wi in range(n_worlds):
-        cfgv = {k: _draw(v["draw"], rng) for k, v in AXES.items()}
-        for r in regimes:
+        u = sample[wi]
+        cfgv = {k: _from_unit(AXES[k]["draw"], u[i]) for i, k in enumerate(scalar)}
+        cfgv["w_shape"] = _draw(("sphere", None, None), rng)
+        for ri, r in enumerate(regimes):
             c = dict(cfgv)
-            c["amplitude"] = _draw(AMPLITUDE[r]["draw"], rng)
+            c["amplitude"] = _from_unit(AMPLITUDE[r]["draw"], u[len(scalar) + ri])
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 row = _evaluate(r, c, seeds, n, n_src, with_nets)
             row.update(mode="worlds", world=wi, axis="", value="", is_default=False)
             rows.append(row)
-        done = [x for x in rows if x.get("world") == wi]
-        worst = max((x for x in done if "adapt_gain" in x),
-                    key=lambda x: x["adapt_gain"], default=None)
-        print(f"  [{wi+1:>3}/{n_worlds}] k=({cfgv['k_inv']},{cfgv['k_spu']}) p={cfgv['p']:<3}"
-              f" sig={cfgv['sigma']:.2f} lam={cfgv['lambda0']:.3f} nu={cfgv['nu']:.2f}"
-              f" |w|={cfgv['w_norm']:.2f}   peggior gain="
+        done = [x for x in rows if x.get("world") == wi and "adapt_gain" in x]
+        worst = max(done, key=lambda x: x["adapt_gain"], default=None)
+        print(f"  [{wi+1:>3}/{n_worlds}] k=({cfgv['k_inv']},{cfgv['k_spu']}) "
+              f"p={cfgv['p']:<3} sig={cfgv['sigma']:.2f} lam={cfgv['lambda0']:.4f} "
+              f"nu={cfgv['nu']:.2f} |w|={cfgv['w_norm']:.2f}   peggior gain="
               f"{(worst['adapt_gain'] if worst else float('nan')):+.4f}"
-              f" ({worst['regime'] if worst else '-'})   ({time.time()-t0:.0f}s)", flush=True)
+              f" ({worst['regime'] if worst else '-'})   ({time.time()-t0:.0f}s)",
+              flush=True)
     return rows
 
 
-# ---------------------------------------------------------------------------
-# Reporting
-# ---------------------------------------------------------------------------
+def confirm(csv_paths, seeds, n, n_src, with_nets, n_confirm) -> list[dict]:
+    """Re-run the largest observed gains on seeds disjoint from the screening set.
+
+    A sweep is a search for candidate counterexamples, not an estimate of the
+    maximum gain. The largest value found after looking at hundreds of
+    configurations is selected, and a selected maximum is biased upwards by
+    exactly the amount that makes it look interesting. The only way to know
+    whether a candidate is real is to measure it again on data that had no part
+    in selecting it -- which is what the disjoint confirmation seeds in the
+    frozen protocol are for.
+
+    Uninformative configurations are excluded from the ranking: their gain is
+    near zero by construction, so they can neither produce nor confirm a break.
+    """
+    import ast, csv as _csv
+
+    pool: list[dict] = []
+    for path in csv_paths:
+        with open(path) as fh:
+            for r in _csv.DictReader(fh):
+                if r.get("verdict") in ("uninformative", "degenerate"):
+                    continue
+                try:
+                    r["_gain"] = float(r["adapt_gain"])
+                except (KeyError, ValueError):
+                    continue
+                r["_src"] = Path(path).name
+                pool.append(r)
+    if not pool:
+        raise SystemExit("nessuna configurazione confermabile nei CSV indicati")
+
+    pool.sort(key=lambda r: -r["_gain"])
+    top = pool[:n_confirm]
+    print(f"  conferma: {len(top)} configurazioni (su {len(pool)}) "
+          f"su {len(seeds)} seed disgiunti {seeds[0]}-{seeds[-1]}\n")
+
+    def _parse(v: str):
+        try:
+            return ast.literal_eval(v)
+        except (ValueError, SyntaxError):
+            return v
+
+    rows, t0 = [], time.time()
+    for i, r in enumerate(top, 1):
+        cfgv = {k: _parse(r[k]) for k in AXES}
+        cfgv["amplitude"] = _parse(r["amplitude"])
+        # A sampled world records its w as coordinates, not as a shape name: the
+        # name "sphere" is a tag, not something _w_vector can resolve. Rebuilding
+        # the direction from the recorded coordinates is what makes a world
+        # reproducible at all, and a confirmation stage that cannot reproduce the
+        # configuration it is confirming would be measuring something else.
+        if cfgv.get("w_shape") == "sphere":
+            w_rec = _parse(r["w"])
+            if not isinstance(w_rec, (list, tuple)) or not len(w_rec):
+                raise SystemExit(
+                    f"mondo non riproducibile: w_shape='sphere' ma colonna w={r.get('w')!r}")
+            cfgv["w_shape"] = [float(x) for x in w_rec]
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            row = _evaluate(r["regime"], cfgv, seeds, n, n_src, with_nets)
+        row.update(mode="confirm", axis=r.get("axis", ""), value=r.get("value", ""),
+                   is_default=False, screen_gain=r["_gain"],
+                   screen_verdict=r.get("verdict", ""), screen_source=r["_src"])
+        rows.append(row)
+        held = row["verdict"] in ("BREAK", "candidate_break")
+        print(f"  [{i:>2}/{len(top)}] {r['regime']:<22}"
+              f"screening={r['_gain']:+.4f} ({r.get('verdict','')})  ->  "
+              f"conferma={row.get('adapt_gain', float('nan')):+.4f} "
+              f"[{row.get('adapt_gain_lo', float('nan')):+.4f}, "
+              f"{row.get('adapt_gain_hi', float('nan')):+.4f}]  {row['verdict']}"
+              f"{'' if held else '   -> non confermata'}   ({time.time()-t0:.0f}s)",
+              flush=True)
+    return rows
+
 
 def report(rows: list[dict]) -> None:
     good = [r for r in rows if r["verdict"] != "degenerate"]
@@ -541,7 +713,10 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(
         description="Sensitivity of the conclusion to the generator's free parameters.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    ap.add_argument("--mode", default="oat", choices=["oat", "worlds"])
+    ap.add_argument("--mode", default="oat", choices=["oat", "worlds", "confirm"])
+    ap.add_argument("--confirm_from", nargs="+", default=None, metavar="CSV",
+                    help="CSV di screening da cui prendere i top-gain (modo confirm)")
+    ap.add_argument("--n_confirm", type=int, default=None)
     ap.add_argument("--regimes", nargs="+", default=REGIMES, choices=REGIMES)
     ap.add_argument("--n_seeds", type=int, default=10)
     ap.add_argument("--n", type=int, default=500)
@@ -554,7 +729,16 @@ if __name__ == "__main__":
 
     seeds = list(range(args.n_seeds))
     t0 = time.time()
-    if args.mode == "oat":
+    if args.mode == "confirm":
+        srcs = args.confirm_from or [str(_TABLES / f"sensitivity_{m}_{args.n_source_domains}src.csv")
+                                     for m in ("oat", "worlds")]
+        srcs = [x for x in srcs if Path(x).exists()]
+        if not srcs:
+            raise SystemExit("nessun CSV di screening trovato; passa --confirm_from")
+        rows = confirm(srcs, PROTOCOL["confirmation_seeds"], args.n,
+                       args.n_source_domains, args.with_nets,
+                       args.n_confirm or PROTOCOL["n_confirm"])
+    elif args.mode == "oat":
         rows = oat(args.regimes, seeds, args.n, args.n_source_domains, args.with_nets)
     else:
         rows = worlds(args.regimes, seeds, args.n, args.n_source_domains,
