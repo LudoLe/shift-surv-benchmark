@@ -83,8 +83,13 @@ calibrated_parameters:
     tolerance: 0.005
     search_bracket: [0.05, 6.0]
     levels:
-      - {target: 0.78, tag: realism, note: "little lost in observation"}
-      - {target: 0.75, tag: realism, note: "benchmark default"}
+      # The benchmark's sigma = 0.5 puts the observed-data oracle at 0.7835 on
+      # the super-population, so 0.78 -- not 0.75 -- is the level that reproduces
+      # it (calibrated sigma 0.515). Tagging 0.75 as the default would have
+      # centred the one-at-a-time design on sigma = 0.747, a benchmark that was
+      # never run.
+      - {target: 0.78, tag: realism, note: "benchmark default; little lost in observation"}
+      - {target: 0.75, tag: realism, note: "slightly noisier observation"}
       - {target: 0.68, tag: realism, note: "at the weakest real transfer"}
       - {target: 0.60, tag: stress,  note: "observation destroys most of the signal"}
 
@@ -132,7 +137,7 @@ direct_parameters:
     # Shape is varied at fixed norm so it is separated from signal strength.
     # It also fixes the concept-shift cosine, which is reported per row.
     levels:
-      - {value: benchmark,    tag: realism, note: "(1, 0.5, -0.5); cosine 1/3"}
+      - {value: benchmark,    tag: realism, note: "(1, 0.5, -0.5); cosine 1/3; benchmark default"}
       - {value: single,       tag: stress,  note: "one factor carries everything"}
       - {value: equal_signed, tag: realism}
       - {value: equal_same,   tag: stress,  note: "was degenerate before the _orthogonal_to fix"}

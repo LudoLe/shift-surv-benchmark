@@ -111,7 +111,7 @@ calibrated:
     endpoints:
     - 0.8235112045195976
     - 0.5520360564216643
-    note: little lost in observation
+    note: benchmark default; little lost in observation
     tag: realism
   - parameter: sigma
     target: 0.75
@@ -122,7 +122,7 @@ calibrated:
     endpoints:
     - 0.8235112045195976
     - 0.5520360564216643
-    note: benchmark default
+    note: slightly noisier observation
     tag: realism
   - parameter: sigma
     target: 0.68

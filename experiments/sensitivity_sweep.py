@@ -177,6 +177,21 @@ _SPACE_PATH = _ROOT / "configs" / "parameter_space.yaml"
 _CALIB_PATH = _ROOT / "configs" / "parameter_space_calibrated.yaml"
 
 
+def _require_default(name: str, levels: list[dict]):
+    """The level marked as the benchmark's own, or a hard failure.
+
+    The one-at-a-time design perturbs around a centre, and that centre has to be
+    the configuration the paper actually ran. Guessing it (the middle of the
+    list, say) produces a table whose "default" row is some other benchmark.
+    """
+    hit = [lv for lv in levels if "default" in (lv.get("note") or "")]
+    if len(hit) != 1:
+        raise SystemExit(
+            f"parameter_space.yaml: '{name}' ha {len(hit)} livelli marcati "
+            "'benchmark default', ne serve esattamente uno")
+    return hit[0]["value"]
+
+
 def _load_space() -> tuple[dict, dict, dict]:
     """Return (AXES, AMPLITUDE, meta) built from the frozen + calibrated files."""
     if not _CALIB_PATH.exists():
@@ -199,9 +214,7 @@ def _load_space() -> tuple[dict, dict, dict]:
         grid = [float(r["value"]) for r in good]
         axes[name] = dict(
             grid=grid,
-            default=float(next(r["value"] for r in good if "default" in (r.get("note") or "")
-                               ) if any("default" in (r.get("note") or "") for r in good)
-                          else grid[1] if len(grid) > 1 else grid[0]),
+            default=float(_require_default(name, good)),
             draw=("log", min(grid), max(grid)),
             semantic={float(r["value"]): (r["target"], r["achieved"], r["tag"]) for r in good},
             controls=space["calibrated_parameters"][name]["controls"],
@@ -211,7 +224,14 @@ def _load_space() -> tuple[dict, dict, dict]:
     for name, spec in space["direct_parameters"].items():
         vals = [lv["value"] for lv in spec["levels"]]
         dflt = next((lv["value"] for lv in spec["levels"]
-                     if "default" in (lv.get("note") or "")), vals[len(vals) // 2])
+                     if "default" in (lv.get("note") or "")), None)
+        if dflt is None:
+            # Falling back to the middle of the list would silently centre the
+            # one-at-a-time design on a configuration that is not the benchmark,
+            # so every "default" row would describe a different paper.
+            raise SystemExit(
+                f"parameter_space.yaml: nessun livello di '{name}' e' marcato "
+                "'benchmark default' nella nota; il centro dell'OAT sarebbe arbitrario")
         if name == "w_shape":
             draw = ("sphere", None, None)
         elif all(isinstance(v, int) for v in vals):
@@ -524,7 +544,8 @@ def oat(regimes, seeds, n, n_src, with_nets) -> list[dict]:
         row.update(mode="oat", axis=ax, value=str(v),
                    is_default=(v == (_defaults(r)[ax])))
         rows.append(row)
-        print(f"  [{i:>3}/{len(jobs)}] {r:<22}{ax:<10}={str(v):<10}"
+        vs = f"{v:.4g}" if isinstance(v, float) else str(v)
+        print(f"  [{i:>3}/{len(jobs)}] {r:<22}{ax:<8}={vs:<14}"
               f"gain={row.get('adapt_gain', float('nan')):+.4f}"
               f"  headroom={row.get('headroom', float('nan')):+.4f}"
               f"  {row['verdict']:<14}({time.time()-t0:.0f}s)", flush=True)
