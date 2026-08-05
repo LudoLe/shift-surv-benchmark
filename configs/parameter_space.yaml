@@ -49,43 +49,14 @@ reference_cohorts:
     p_over_n_train: [0.003, 0.012]
   coverage_statement: >
     The realism levels bracket both cohorts on minority-class fraction and on
-    latent/observed discrimination. They do NOT reach the registry's lowest
-    p/n of 0.003, which would need n in the thousands; p/n coverage is
-    therefore partial on the low side and extended on the high side as stress.
+    latent/observed discrimination. On p/n the grid now spans 0.0013 to 0.40,
+    which contains both cohorts (I3LUNG 0.016-0.058, registry 0.003-0.012): the
+    n=10000 stress level reaches 0.0025 at p=20, below the registry's own
+    minimum. That level is one-at-a-time only; the joint sampling stops at
+    n=2000, so p/n coverage in the worlds mode is 0.0063 upward and the
+    registry's low end is covered by the one-at-a-time design alone.
 
 # ---- Continuous parameters, declared by semantic target ---------------------
-#
-# Reading the two AUROC axes together. The latent-oracle targets (0.70-0.97) and
-# the observed-oracle targets (0.78-0.60) belong to DIFFERENT axes and are never
-# combined: each is calibrated with the other parameters at the benchmark's own
-# values, and the one-at-a-time design moves one axis at a time. Reading "latent
-# 0.70" against "observed 0.78" as a single configuration is therefore a category
-# error -- that configuration does not exist in the design.
-#
-# Measured on the super-population across the whole grid, the observed-data
-# oracle stays below the latent oracle everywhere, as it must here: under
-# no_shift the spurious factors are independent of the invariant ones and do not
-# enter eta, so x carries no information about y beyond what u_inv carries.
-#
-#   ||w||   sigma   latent   observed
-#   0.655   0.500   0.7025   0.6804
-#   0.655   2.653   0.7025   0.5711
-#   1.225   0.500   0.8237   0.7835     <- the benchmark
-#   1.225   2.653   0.8237   0.6075
-#   1.952   0.500   0.9034   0.8486
-#   4.050   0.500   0.9706   0.8997
-#
-# The ordering can invert inside the benchmark itself -- under concept shift the
-# source-fitted latent oracle falls below the observed-data oracle, and the paper
-# reports the sign of that gap as diagnostic. That is a property of a shifted
-# outcome mechanism, not of this calibration, which runs on no_shift.
-#
-# One more distinction the two modes do not share. In the one-at-a-time mode each
-# level IS a semantic target: it was calibrated to it against the benchmark
-# background. In the worlds mode the axes are drawn jointly between the extremes
-# of those calibrated grids, so a drawn sigma no longer corresponds to its
-# calibrated observed-AUROC once w has also moved. There the achieved quantities
-# are diagnostics to be reported, not targets that were hit.
 #
 # Reading the two AUROC axes together. The latent-oracle targets (0.70-0.97) and
 # the observed-oracle targets (0.78-0.60) belong to DIFFERENT axes and are never
@@ -171,7 +142,16 @@ direct_parameters:
       - {value: 250,  tag: realism, note: "at the smallest I3LUNG centre (n=191)"}
       - {value: 500,  tag: realism, note: "benchmark default; middle of the real range"}
       - {value: 1000, tag: realism, note: "above the largest I3LUNG centre (n=668)"}
-      - {value: 2000, tag: stress,  note: "registry scale (Rotterdam n=2894)"}
+      - {value: 2000,  tag: stress, note: "registry scale (Rotterdam n=2894)"}
+      - {value: 10000, tag: stress, note: "p/n_train = 0.0025 at p=20, below the registry's own 0.003"}
+    # The worlds mode samples between the extremes of a grid, and a log-uniform
+    # draw on [250, 10000] has mean 2643 against 842 on [250, 2000] -- five times
+    # the cost per world, about 160 hours for the coverage search alone. n=10000
+    # is worth one one-at-a-time cell, where it is the only level that reaches
+    # the registry's own p/n and closes the coverage gap below. It is not worth
+    # paying for in every one of nine hundred sampled worlds, so the sampling
+    # range stops at 2000 and this asymmetry is declared rather than hidden.
+    draw_range: [250, 2000]
 
   p:
     controls: observed_dimension

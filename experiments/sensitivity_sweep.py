@@ -260,12 +260,19 @@ def _load_space() -> tuple[dict, dict, dict]:
             raise SystemExit(
                 f"parameter_space.yaml: nessun livello di '{name}' e' marcato "
                 "'benchmark default' nella nota; il centro dell'OAT sarebbe arbitrario")
+        # The sampling range defaults to the grid's extremes, but an axis may
+        # declare its own: a level can be worth one one-at-a-time cell and not
+        # worth paying for in every sampled world. n_per_domain is the case --
+        # its 10000 level is the only one reaching the registry's p/n, and a
+        # log-uniform draw up to there would cost five times as much per world.
+        _dr = spec.get("draw_range")
+        _lo, _hi = (_dr if _dr else (min(vals), max(vals)))
         if name == "w_shape":
             draw = ("sphere", None, None)
         elif all(isinstance(v, int) for v in vals):
-            draw = ("int", min(vals), max(vals))
+            draw = ("logint", _lo, _hi) if _hi / max(_lo, 1) >= 4 else ("int", _lo, _hi)
         else:
-            draw = ("lin", min(vals), max(vals))
+            draw = ("lin", _lo, _hi)
         axes[name] = dict(grid=vals, default=dflt, draw=draw,
                           semantic={v: (None, None, lv["tag"])
                                     for v, lv in zip(vals, spec["levels"])},
