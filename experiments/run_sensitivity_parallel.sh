@@ -50,8 +50,34 @@ fi
 
 # One thread per process: every job is already a whole core, and letting BLAS
 # fan out inside each of them makes twenty-four jobs fight over the same cores.
+# TensorFlow does not read OMP_NUM_THREADS, so the BLAS variables alone left
+# every DANN/CDAN process opening about sixty-five threads: ninety-six jobs came
+# to six thousand threads over a hundred and ninety-two hardware ones, load
+# average 1006 at 46% CPU, and the machine spent its time context-switching. The
+# TF variables are set in experiments/adaptation_methods.py before the import
+# that initialises the runtime, and repeated here so a job launched by hand
+# behaves the same way.
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
-       NUMEXPR_NUM_THREADS=1 PYTHONUNBUFFERED=1
+       NUMEXPR_NUM_THREADS=1 PYTHONUNBUFFERED=1 \
+       TF_NUM_INTRAOP_THREADS=1 TF_NUM_INTEROP_THREADS=1 \
+       TF_CPP_MIN_LOG_LEVEL=3
+
+# A sanity check worth the two seconds: if a job still opens more than a couple
+# of threads, the whole parallel plan is wrong and it is better to find out now
+# than four hours in.
+_THR="$(python - <<'PYEOF' 2>/dev/null
+import threading, warnings; warnings.filterwarnings("ignore")
+import experiments.adaptation_methods  # noqa: F401
+print(threading.active_count())
+PYEOF
+)"
+if [ -n "${_THR:-}" ] && [ "$_THR" -gt 4 ]; then
+  echo "ATTENZIONE: un processo apre $_THR thread dopo l'import di TensorFlow."
+  echo "            Con $JOBS job paralleli il server andra' in thrashing."
+  echo "            Controlla che experiments/adaptation_methods.py imposti"
+  echo "            TF_NUM_INTRAOP_THREADS prima dell'import di adapt."
+  exit 1
+fi
 
 if [ ! -f configs/parameter_space_calibrated.yaml ]; then
   echo "ERRORE: manca configs/parameter_space_calibrated.yaml"

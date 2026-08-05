@@ -40,12 +40,50 @@ from sklearn.preprocessing import StandardScaler
 from generator.base_generator import DomainDataset
 from utils.metrics import auroc, auprc, ece, prevalence, f1, sensitivity, specificity
 
-# Suppress TF C++ startup messages before the first TF import.
+# Everything below has to happen before the first TensorFlow import, which the
+# `adapt` import triggers: TF reads these once at initialisation and ignores them
+# afterwards.
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+
+# One thread per process. TensorFlow does NOT honour OMP_NUM_THREADS -- it has
+# its own pools -- so a run parallelised at the process level oversubscribes
+# badly without this: ninety-six concurrent jobs opened about sixty-five threads
+# each, six thousand threads over a hundred and ninety-two hardware ones, and the
+# machine spent more time context-switching than computing (load average 1006 at
+# 46% CPU). Each sweep job is already a whole core; the parallelism belongs
+# between processes, not inside them.
+os.environ.setdefault("TF_NUM_INTRAOP_THREADS", "1")
+os.environ.setdefault("TF_NUM_INTEROP_THREADS", "1")
+
+# Determinism. tf.random.set_seed alone does not give it: reductions on CPU are
+# order-dependent across threads, so the same seed produced target AUROC 0.6727
+# and 0.6912 on two separate processes. Single-threaded plus deterministic ops
+# makes DANN and CDAN reproducible, which they were not before -- and which
+# matters because their spread across seeds is otherwise part training noise
+# that no re-run can reproduce.
+os.environ.setdefault("TF_DETERMINISTIC_OPS", "1")
+os.environ.setdefault("TF_CUDNN_DETERMINISTIC", "1")
+
+def _configure_tf_threads() -> None:
+    """Pin TF to one thread per pool, in case the env vars were set too late.
+
+    The environment variables above are the reliable route, but they only bite if
+    nothing imported TensorFlow first. This is the belt-and-braces version and is
+    a no-op once the runtime is already initialised single-threaded.
+    """
+    try:
+        import tensorflow as _tf
+        _tf.config.threading.set_intra_op_parallelism_threads(1)
+        _tf.config.threading.set_inter_op_parallelism_threads(1)
+    except Exception:
+        pass
+
 
 from adapt.feature_based import CORAL as _CORAL   # noqa: E402
 from adapt.feature_based import DANN  as _DANN    # noqa: E402
 from adapt.feature_based import CDAN  as _CDAN    # noqa: E402
+
+_configure_tf_threads()
 
 
 # ---------------------------------------------------------------------------
