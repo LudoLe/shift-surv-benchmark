@@ -22,6 +22,7 @@ Usage
 """
 
 from __future__ import annotations
+import warnings
 import numpy as np
 from typing import Optional
 
@@ -126,7 +127,12 @@ def generate_scenario(
     # The fixed-horizon benchmark leaves this at 0 (delta == 1 for all); the
     # survival validity check (experiments/run_survival.py) turns it on so a
     # Cox model is trained and scored on genuinely censored data.
-    if censoring_lambda > 0.0:
+    # The same caveat applies whether censoring arrives through this argument or
+    # through a scenario that sets it (censoring_shift does, by design), so the
+    # check looks at the resolved parameters rather than only at the argument.
+    _scenario_censors = any(sp.censoring_lambda > 0.0 for sp in source_p) or \
+        target_p.censoring_lambda > 0.0
+    if censoring_lambda > 0.0 or _scenario_censors:
         # The fixed-horizon label is y = 1[t_obs <= tau AND delta == 1], i.e.
         # "event observed by tau". Without censoring that is exactly 1[T <= tau],
         # the estimand the binary benchmark targets. With censoring it is not:
@@ -136,8 +142,11 @@ def generate_scenario(
         # on, and it fits a Cox model on (t_obs, delta) rather than using y.
         # Warned rather than blocked because the parameter is legitimate for
         # survival-side use; the point is that it must not reach the binary path.
+        _src = (f"censoring_lambda={censoring_lambda} is set"
+                if censoring_lambda > 0.0
+                else f"scenario '{name}' introduces censoring")
         warnings.warn(
-            f"censoring_lambda={censoring_lambda} is set. The fixed-horizon "
+            f"{_src}. The fixed-horizon "
             "label y then means 'event observed by tau', NOT 1[T <= tau]: "
             "patients censored before tau are labelled 0 with unknown true "
             "status. Use survival-aware evaluation (see run_survival.py), not "
@@ -145,9 +154,13 @@ def generate_scenario(
             RuntimeWarning,
             stacklevel=2,
         )
-        for sp in source_p:
-            sp.censoring_lambda = censoring_lambda
-        target_p.censoring_lambda = censoring_lambda
+        # Only the explicit argument overrides the per-domain values; a scenario
+        # that set its own censoring (censoring_shift) must keep it, which an
+        # unconditional assignment of the default 0.0 would silently erase.
+        if censoring_lambda > 0.0:
+            for sp in source_p:
+                sp.censoring_lambda = censoring_lambda
+            target_p.censoring_lambda = censoring_lambda
 
     source_datasets = gen.generate_domains(source_p)
     if name == "prior_shift":
@@ -170,6 +183,33 @@ def generate_scenario(
 # ---------------------------------------------------------------------------
 # Scenario parameterisations
 # ---------------------------------------------------------------------------
+
+def _orthogonal_to(w: np.ndarray, k: int) -> np.ndarray:
+    """A unit vector orthogonal to ``w``, used as the latent mean-shift direction.
+
+    Shifting mu_inv along a direction orthogonal to w leaves E[eta] = beta0
+    unchanged, which is what keeps a covariate shift from also moving the event
+    prevalence and turning into a label-prior shift.
+
+    The direction is obtained by projecting a reference vector off w. The
+    reference is the all-ones vector, which is what this has always used and
+    what keeps the benchmark's own w = (1, 0.5, -0.5) bit-identical to previous
+    runs. That construction has one failure mode: when w is parallel to the
+    all-ones vector -- w = (1, 1, 1) is the obvious case -- the projection is
+    exactly zero, the normalisation returns the zero vector, and the scenario
+    silently produces no shift at all. It does not bite at the benchmark's w,
+    but it makes w unsafe to vary, which the sensitivity sweep does. When that
+    happens we fall back to the standard basis vector least aligned with w,
+    which cannot be parallel to it.
+    """
+    w = np.asarray(w, dtype=float)
+    d = np.ones(k, dtype=float)
+    d -= (np.dot(d, w) / np.dot(w, w)) * w
+    if np.linalg.norm(d) < 1e-8:
+        e = np.zeros(k, dtype=float)
+        e[int(np.argmin(np.abs(w)))] = 1.0
+        d = e - (np.dot(e, w) / np.dot(w, w)) * w
+    return d / (np.linalg.norm(d) + 1e-8)
 
 def _no_shift(
     source_params: list[DomainParams],
@@ -234,9 +274,7 @@ def _covariate_shift(
 
     # Shift direction orthogonal to w → w^T mu_inv = 0 → stable prevalence
     w_src = source_params[0].w.copy()
-    d = np.ones(base.k_inv, dtype=float)
-    d -= (np.dot(d, w_src) / np.dot(w_src, w_src)) * w_src
-    d /= np.linalg.norm(d) + 1e-8
+    d = _orthogonal_to(w_src, base.k_inv)
 
     target = source_params[0].copy()
     target.domain_id = target_id
@@ -299,9 +337,7 @@ def _observational_shift(
                                                           source_sigma_jitter)
 
     w_src = source_params[0].w.copy()
-    d = np.ones(base.k_inv, dtype=float)
-    d -= (np.dot(d, w_src) / np.dot(w_src, w_src)) * w_src
-    d /= np.linalg.norm(d) + 1e-8
+    d = _orthogonal_to(w_src, base.k_inv)
 
     c, s = np.cos(a_inv_rotation_angle), np.sin(a_inv_rotation_angle)
     R = np.eye(base.k_inv, dtype=float)
@@ -346,17 +382,13 @@ def _spurious_shift(
     within-domain shortcut: models that see x can use the spurious component
     of x as a proxy for the invariant signal.
 
-    In the target domain, (a) u_inv and u_spu are independent (ρ = 0), and
-    (b) the mean of u_spu flips sign.  Both effects break the spurious
-    shortcut, so spurious-reliant models degrade.  Invariant-only models are
-    stable because w_d and the invariant distribution are unchanged.
-
     The within-domain cross-covariance is the standard mechanism for spurious
     correlation in the representation-learning literature (akin to Colored
     MNIST, where label and spurious feature are statistically associated
     within training domains but not at test time).
     """
     k = base.k_inv + base.k_spu
+    assert abs(rho_source) < 1, "rho_source must be in (-1, 1)"
 
     def _build_latent_cov(rho: float) -> np.ndarray:
         """
@@ -389,7 +421,7 @@ def _spurious_shift(
     cov_src = _build_latent_cov(rho_source)  # u_inv ↔ u_spu correlated in source
     cov_tgt = np.eye(k)                       # independent in target
 
-    for i, sp in enumerate(source_params):
+    for sp in source_params:
         sp.v = np.zeros(base.k_spu)       # spurious factors NEVER directly enter risk
         sp.mu_spu = np.zeros(base.k_spu)  # mean unchanged (μ^spu fixed across domains)
         sp.latent_cov = cov_src            # within-domain shortcut structure
@@ -599,6 +631,13 @@ def _generate_prior_shift_target(
 
     n_pos = int(round(n * pi_target))
     n_neg = n - n_pos
+    
+    if len(pos) < n_pos or len(neg) < n_neg:
+        warnings.warn(
+            f"Pool insufficiente per pi_target={pi_target}: campionamento con "
+            f"rimpiazzo (pos={len(pos)}/{n_pos}, neg={len(neg)}/{n_neg})."
+        )
+    
     sel = np.concatenate([
         rng.choice(pos, size=n_pos, replace=len(pos) < n_pos),
         rng.choice(neg, size=n_neg, replace=len(neg) < n_neg),

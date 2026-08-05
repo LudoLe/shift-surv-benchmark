@@ -1,0 +1,190 @@
+# ============================================================================
+# SHIFT-SURV sensitivity analysis — frozen parameter space
+# ----------------------------------------------------------------------------
+# This file is the design specification for experiments/sensitivity_sweep.py.
+# It is FROZEN: it is written before the sweep is run and must not be edited
+# after any result has been inspected. Tuning the space to the outcome is the
+# failure mode the whole analysis exists to rule out.
+#
+# Continuous parameters are declared through the quantity they are meant to
+# control, not through their raw value. lambda0 is not "0.02", it is "the value
+# that makes the minority class 33% of the cohort"; w is not "(1, 0.5, -0.5)",
+# it is "the value that puts the latent oracle at AUROC 0.82". The raw values
+# are then obtained by bisection on a fixed super-population
+# (experiments/calibrate.py) and recorded in the `calibrated:` block below.
+# This follows Austin's separation between a large fixed population used for
+# calibration and the finite samples used for the replicates themselves.
+#
+# Every level is tagged:
+#   realism  chosen to resemble what the two real cohorts exhibit
+#   stress   deliberately more extreme, to probe where the conclusion fails
+# The paper must not describe the whole grid as realistic. It contains an
+# application-calibrated region AND explicit stress regimes, and says so.
+#
+# Polarity note. The synthetic label is "event by tau", the I3LUNG label OS_6 is
+# "alive at 6 months" (verified: corr(OS_6, survives past 6mo) = +1.000). The two
+# are opposite in sign, so prevalence is declared here as the MINORITY CLASS
+# FRACTION, which is polarity-invariant. AUROC and equal-width-bin ECE are both
+# invariant under (y, p) -> (1-y, 1-p), so the comparison is legitimate.
+# ============================================================================
+
+meta:
+  frozen_on: "2026-08-05"
+  frozen_before_results: true
+  margin_auroc: 0.02          # same pre-specified margin as configs/generator.yaml
+  headroom_threshold: 0.02    # below this a configuration cannot test the claim
+
+# ---- Observed ranges the realism cells are calibrated against ---------------
+# Recorded here so the grid's coverage claim is auditable rather than asserted.
+reference_cohorts:
+  i3lung:
+    n_variables: 11
+    minority_class_fraction: [0.16, 0.42]   # = 1 - OS_6 prevalence, six centres
+    erm_target_auroc: [0.65, 0.78]          # across the seven transfers
+    p_over_n_train: [0.016, 0.058]
+  registry_rotterdam_gbsg:
+    n_variables: 8
+    minority_class_fraction: [0.30, 0.40]
+    erm_target_auroc: [0.66, 0.70]
+    p_over_n_train: [0.003, 0.012]
+  coverage_statement: >
+    The realism levels bracket both cohorts on minority-class fraction and on
+    latent/observed discrimination. They do NOT reach the registry's lowest
+    p/n of 0.003, which would need n in the thousands; p/n coverage is
+    therefore partial on the low side and extended on the high side as stress.
+
+# ---- Continuous parameters, declared by semantic target ---------------------
+calibrated_parameters:
+
+  lambda0:
+    controls: minority_class_fraction
+    tolerance: 0.005
+    search_bracket: [0.001, 0.60]
+    levels:
+      - {target: 0.15, tag: realism, note: "below the I3LUNG minimum of 0.16"}
+      - {target: 0.33, tag: realism, note: "benchmark default; inside both cohorts"}
+      - {target: 0.45, tag: realism, note: "above the I3LUNG maximum of 0.42"}
+      - {target: 0.05, tag: stress,  note: "rare-event regime, outside both cohorts"}
+
+  w_norm:
+    controls: latent_oracle_auroc
+    tolerance: 0.005
+    search_bracket: [0.10, 8.0]
+    levels:
+      - {target: 0.70, tag: realism, note: "weak prognostic signal"}
+      - {target: 0.82, tag: realism, note: "benchmark default"}
+      - {target: 0.90, tag: realism, note: "strong but attainable clinically"}
+      - {target: 0.97, tag: stress,  note: "beyond any real tabular clinical model"}
+
+  sigma:
+    controls: observed_oracle_auroc
+    # Calibrated AFTER w_norm, so it sets how much of the latent signal survives
+    # the observation process rather than how much signal exists.
+    tolerance: 0.005
+    search_bracket: [0.05, 6.0]
+    levels:
+      - {target: 0.78, tag: realism, note: "little lost in observation"}
+      - {target: 0.75, tag: realism, note: "benchmark default"}
+      - {target: 0.68, tag: realism, note: "at the weakest real transfer"}
+      - {target: 0.60, tag: stress,  note: "observation destroys most of the signal"}
+
+# ---- Parameters used directly, with no calibration needed ------------------
+direct_parameters:
+
+  p:
+    controls: observed_dimension
+    levels:
+      - {value: 10, tag: realism, note: "p/n_train = 0.025, near the cohorts"}
+      - {value: 20, tag: realism, note: "benchmark default"}
+      - {value: 40, tag: stress,  note: "p/n_train = 0.10"}
+      - {value: 80, tag: stress,  note: "p/n_train = 0.20, far beyond both cohorts"}
+
+  nu:
+    controls: hazard_shape
+    # Levels are qualitatively distinct hazard shapes, not a numeric bracket.
+    levels:
+      - {value: 0.7, tag: realism, note: "decreasing hazard"}
+      - {value: 1.0, tag: realism, note: "constant hazard (exponential)"}
+      - {value: 1.5, tag: realism, note: "increasing hazard; benchmark default"}
+      - {value: 2.5, tag: stress,  note: "strongly increasing hazard"}
+
+  k_inv:
+    controls: n_invariant_latent_factors
+    # w is truncated or zero-padded to k_inv, so k_inv=2 drops a real risk
+    # coefficient and k_inv>3 adds inert factors. Neither is "the same benchmark
+    # with more factors"; the sweep reports the realised w alongside.
+    levels:
+      - {value: 2, tag: realism}
+      - {value: 3, tag: realism, note: "benchmark default"}
+      - {value: 4, tag: stress}
+      - {value: 5, tag: stress}
+
+  k_spu:
+    controls: n_spurious_latent_factors
+    levels:
+      - {value: 1, tag: realism}
+      - {value: 2, tag: realism, note: "benchmark default"}
+      - {value: 3, tag: stress}
+      - {value: 4, tag: stress}
+
+  w_shape:
+    controls: direction_of_w_at_fixed_norm
+    # Shape is varied at fixed norm so it is separated from signal strength.
+    # It also fixes the concept-shift cosine, which is reported per row.
+    levels:
+      - {value: benchmark,    tag: realism, note: "(1, 0.5, -0.5); cosine 1/3"}
+      - {value: single,       tag: stress,  note: "one factor carries everything"}
+      - {value: equal_signed, tag: realism}
+      - {value: equal_same,   tag: stress,  note: "was degenerate before the _orthogonal_to fix"}
+      - {value: asymmetric,   tag: realism}
+
+# ---- Per-regime severity, one knob each ------------------------------------
+# rho is frozen by the pre-specified pilot (experiments/pilot_spurious_rho.py)
+# at 0.7. It is swept anyway, to show the pilot did not land on a lucky point.
+shift_amplitude:
+  covariate_shift:
+    kwarg: mu_inv_shift_scale
+    levels: [{value: 0.5, tag: realism}, {value: 1.5, tag: realism, note: default},
+             {value: 3.0, tag: stress}]
+  observational_shift:
+    kwarg: a_inv_rotation_angle_deg
+    levels: [{value: 30, tag: realism}, {value: 60, tag: realism, note: default},
+             {value: 85, tag: stress}]
+  spurious_shift:
+    kwarg: rho_source
+    frozen_by_pilot: 0.7
+    levels: [{value: 0.5, tag: realism}, {value: 0.7, tag: realism, note: default},
+             {value: 0.95, tag: stress}]
+  baseline_hazard_shift:
+    kwarg: lambda0_target
+    levels: [{value: 0.03, tag: realism}, {value: 0.06, tag: realism, note: default},
+             {value: 0.15, tag: stress}]
+  prior_shift:
+    kwarg: prevalence_target
+    levels: [{value: 0.45, tag: realism}, {value: 0.60, tag: realism, note: default},
+             {value: 0.80, tag: stress}]
+  concept_shift:
+    kwarg: w_flip_indices
+    levels: [{value: [2],       tag: realism, note: "cosine +0.67"},
+             {value: [1, 2],    tag: realism, note: "cosine +1/3; default"},
+             {value: [0, 1, 2], tag: stress,  note: "cosine -1, full reversal"}]
+
+# ---- Protocol, fixed before the sweep --------------------------------------
+protocol:
+  n_per_domain: 500
+  screening_seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  # Disjoint from the screening seeds, so a confirmed break is not the same
+  # noise that produced the candidate.
+  confirmation_seeds: [100, 101, 102, 103, 104, 105, 106, 107, 108, 109,
+                       110, 111, 112, 113, 114, 115, 116, 117, 118, 119]
+  n_worlds_1src: 100
+  n_worlds_3src: 50
+  n_confirm: 20                # how many top-gain configurations get re-run
+  superpopulation_n: 20000     # fixed population used only for calibration
+  superpopulation_seed: 999
+  decision_rule:
+    supported:      "gain 95% upper limit < margin"
+    inconclusive:   "interval spans the margin"
+    candidate_break: "point estimate > margin but lower limit <= margin"
+    breaks:         "gain 95% lower limit > margin"
+    uninformative:  "headroom point estimate < headroom_threshold"

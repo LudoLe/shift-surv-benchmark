@@ -38,7 +38,10 @@ from scipy import stats
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO_TABLES = os.path.join(ROOT, "outputs", "tables")
-PRIOR_TABLES = os.path.expanduser("~/Downloads/shift-surv-outputs/tables")
+# The label-prior sweep now lives in the repo alongside every other sweep, so a
+# clone reproduces this figure. It used to default to a download folder, which
+# meant the figure silently could not be regenerated anywhere but one laptop.
+PRIOR_TABLES = REPO_TABLES
 OUTDIR = os.path.join(ROOT, "outputs", "figures", "paper")
 
 N_GRID = [250, 500, 1000, 2000]

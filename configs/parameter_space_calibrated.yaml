@@ -1,0 +1,148 @@
+calibrated_on:
+  superpopulation_n: 20000
+  superpopulation_seed: 999
+  background:
+    lambda0: 0.02
+    nu: 1.5
+    w:
+    - 1.0
+    - 0.5
+    - -0.5
+    sigma: 0.5
+    w_norm: 1.224744871391589
+calibrated:
+  lambda0:
+  - parameter: lambda0
+    target: 0.15
+    value: 0.006264648437500001
+    achieved: 0.1487
+    n_iter: 10
+    bracketed: true
+    endpoints:
+    - 0.02785
+    - 0.95425
+    note: below the I3LUNG minimum of 0.16
+    tag: realism
+  - parameter: lambda0
+    target: 0.33
+    value: 0.01971875
+    achieved: 0.33185
+    n_iter: 5
+    bracketed: true
+    endpoints:
+    - 0.02785
+    - 0.95425
+    note: benchmark default; inside both cohorts
+    tag: realism
+  - parameter: lambda0
+    target: 0.45
+    value: 0.0337578125
+    achieved: 0.44945
+    n_iter: 7
+    bracketed: true
+    endpoints:
+    - 0.02785
+    - 0.95425
+    note: above the I3LUNG maximum of 0.42
+    tag: realism
+  - parameter: lambda0
+    target: 0.05
+    value: 0.0018774414062500003
+    achieved: 0.0507
+    n_iter: 11
+    bracketed: true
+    endpoints:
+    - 0.02785
+    - 0.95425
+    note: rare-event regime, outside both cohorts
+    tag: stress
+  w_norm:
+  - parameter: w_norm
+    target: 0.7
+    value: 0.65546875
+    achieved: 0.7025017707356358
+    n_iter: 7
+    bracketed: true
+    endpoints:
+    - 0.5311100238916836
+    - 0.9922236192690291
+    note: weak prognostic signal
+    tag: realism
+  - parameter: w_norm
+    target: 0.82
+    value: 1.2109375
+    achieved: 0.8219345492973641
+    n_iter: 6
+    bracketed: true
+    endpoints:
+    - 0.5311100238916836
+    - 0.9922236192690291
+    note: benchmark default
+    tag: realism
+  - parameter: w_norm
+    target: 0.9
+    value: 1.8281249999999998
+    achieved: 0.8950017460478862
+    n_iter: 5
+    bracketed: true
+    endpoints:
+    - 0.5311100238916836
+    - 0.9922236192690291
+    note: strong but attainable clinically
+    tag: realism
+  - parameter: w_norm
+    target: 0.97
+    value: 4.05
+    achieved: 0.9705920305202467
+    n_iter: 1
+    bracketed: true
+    endpoints:
+    - 0.5311100238916836
+    - 0.9922236192690291
+    note: beyond any real tabular clinical model
+    tag: stress
+  sigma:
+  - parameter: sigma
+    target: 0.78
+    value: 0.51484375
+    achieved: 0.7815107136633703
+    n_iter: 6
+    bracketed: true
+    endpoints:
+    - 0.8235112045195976
+    - 0.5520360564216643
+    note: little lost in observation
+    tag: realism
+  - parameter: sigma
+    target: 0.75
+    value: 0.7472656249999999
+    achieved: 0.7496389935432153
+    n_iter: 7
+    bracketed: true
+    endpoints:
+    - 0.8235112045195976
+    - 0.5520360564216643
+    note: benchmark default
+    tag: realism
+  - parameter: sigma
+    target: 0.68
+    value: 1.3515625
+    achieved: 0.6812617258367013
+    n_iter: 5
+    bracketed: true
+    endpoints:
+    - 0.8235112045195976
+    - 0.5520360564216643
+    note: at the weakest real transfer
+    tag: realism
+  - parameter: sigma
+    target: 0.6
+    value: 3.025
+    achieved: 0.5960068916672623
+    n_iter: 1
+    bracketed: true
+    endpoints:
+    - 0.8235112045195976
+    - 0.5520360564216643
+    note: observation destroys most of the signal
+    tag: stress

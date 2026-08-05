@@ -116,6 +116,25 @@ def _importance_weights(
     validation set being scored, while the classifier is trained on the source
     train split — so callers pass X_eval=X_val_s.  This also keeps the weights
     out-of-sample w.r.t. the classifier, avoiding optimistic self-weighting.
+
+    Why the weights are normalised to mean 1
+    ----------------------------------------
+    The domain classifier is trained on n_src source points against n_tgt target
+    points, so its class prior is pi_t/pi_s rather than 1/2, and the odds it
+    returns carry that ratio: E_src[w] = pi_t/pi_s, not 1.  With the benchmark's
+    400 train / 500 target split that is 1.25; on the I3LUNG INT->GHD transfer
+    (534 train / 430 target) it is 0.81.
+
+    That constant is harmless for ``_weighted_auroc`` (AUROC is scale-invariant
+    in the sample weights) but not for ``fit_iw_erm``: sklearn's logistic
+    objective is ``C * sum_i w_i * loss_i + 0.5 * ||theta||^2``, so scaling every
+    weight by c scales the effective ``C`` by c.  IW-ERM at C=1.0 was therefore
+    being regularised 25% more weakly than the ERM baseline it is compared
+    against, and the direction of that bias changed with the source/target size
+    ratio.  Part of the IW-ERM-vs-ERM difference was regularisation rather than
+    reweighting.  Normalising removes the confound and leaves the *relative*
+    weights — the only thing importance weighting is supposed to change —
+    untouched.
     """
     X = np.vstack([X_src, X_tgt])
     y = np.array([0] * len(X_src) + [1] * len(X_tgt), dtype=float)
@@ -126,7 +145,9 @@ def _importance_weights(
     X_w = X_src if X_eval is None else X_eval
     p_tgt = clf.predict_proba(X_w)[:, 1]
     p_src = np.clip(1.0 - p_tgt, 1e-6, None)
-    return np.clip(p_tgt / p_src, 0.05, 20.0)
+    w = np.clip(p_tgt / p_src, 0.05, 20.0)
+    mean_w = float(w.mean())
+    return w / mean_w if mean_w > 0 else w
 
 
 def _weighted_auroc(y_true: np.ndarray, probs: np.ndarray, weights: np.ndarray) -> float:
@@ -224,9 +245,14 @@ def _build_networks(
     Architecture
     ~~~~~~~~~~~~
     encoder      : Dense(enc_units[0], relu) → Dense(enc_units[1], relu)
-    task (DANN)  : Dense(1, sigmoid)
-    task (CDAN)  : Dense(2, softmax)
+    task         : Dense(1, sigmoid)              [task_softmax=False, default]
+                   Dense(2, softmax)              [task_softmax=True]
     discriminator: Dense(32, relu) → Dense(1, sigmoid)
+
+    Both DANN and CDAN call this with task_softmax=False, i.e. a 1-D sigmoid
+    head. The softmax branch is kept because ADAPT's CDAN accepts either, but
+    nothing in this benchmark uses it — an earlier version of this docstring
+    claimed CDAN used the 2-unit softmax, which it does not.
     """
     import tensorflow as tf
     from tensorflow.keras import Sequential, Input
@@ -641,16 +667,42 @@ def fit_irm(
     ||∇_θ R_e||² (which collapses to ERM at its own optimum) — that earlier
     formulation was the bug flagged in review.
 
-    λ=100 is the usual default for IRMv1 on tabular data.  No inner CV.
+    λ=100 is the usual default for IRMv1 on tabular data.  No inner CV — the
+    penalty weight is fixed, not selected, which is a limitation to state rather
+    than to hide: an IRM result reported against ERM invites exactly the
+    objection that λ was not tuned.
+
+    Train/validation protocol
+    -------------------------
+    Like every other method here, IRM fits on a stratified 80% of each source
+    environment and reports ``source_pooled`` on the held-out 20%.  It used to
+    fit on 100% of the pooled source and report ``source_pooled`` **in sample**,
+    which made two columns incomparable with the rest of the table: its
+    ``src_auroc`` was optimistic (so the ``gap`` column understated its
+    degradation), and it trained on 25% more data than the methods it is scored
+    against.  The split is per-environment because IRMv1 needs the environment
+    partition to survive it, and it uses ``random_state=0`` to match the pooled
+    split the other methods take, so the seed-level pairing the sign-flip test
+    assumes still holds.
     """
     from scipy.optimize import minimize
     from scipy.special import expit
+    from sklearn.model_selection import train_test_split as _tts
+
+    tr_parts, val_parts = [], []
+    for ds in source_datasets:
+        X_tr_d, X_val_d, y_tr_d, y_val_d = _tts(
+            ds.x, ds.y, test_size=0.2, random_state=0, stratify=ds.y,
+        )
+        tr_parts.append((X_tr_d, y_tr_d))
+        val_parts.append((X_val_d, y_val_d))
 
     scaler = StandardScaler()
-    X_all, y_all = _pool_sources(source_datasets)
-    scaler.fit(X_all)
+    scaler.fit(np.vstack([X for X, _ in tr_parts]))
 
-    envs    = [(scaler.transform(ds.x), ds.y.astype(float)) for ds in source_datasets]
+    envs    = [(scaler.transform(X), y.astype(float)) for X, y in tr_parts]
+    X_val_all = np.vstack([X for X, _ in val_parts])
+    y_val_all = np.concatenate([y for _, y in val_parts]).astype(float)
     X_tgt_s = scaler.transform(target_dataset.x)
     y_src_all = np.concatenate([y for _, y in envs])
     p = envs[0][0].shape[1]
@@ -663,7 +715,9 @@ def fit_irm(
             z   = X @ theta                         # logits (n_e,)
             s   = expit(z)                          # sigma(z)
             # --- ERM cross-entropy term ---
-            loss += float(np.mean(np.log1p(np.exp(-(2 * y - 1) * z))))
+            # logaddexp(0, u) is softplus without the exp() overflow that
+            # log1p(exp(u)) hits once |z| grows past ~700.
+            loss += float(np.mean(np.logaddexp(0.0, -(2 * y - 1) * z)))
             grad += X.T @ (s - y) / n_e
             # --- IRMv1 penalty: g_e = mean((s - y) * z),  penalty = g_e^2 ---
             g_e = float(np.mean((s - y) * z))
@@ -680,7 +734,11 @@ def fit_irm(
                    options={"maxiter": n_iter, "ftol": 1e-9, "gtol": 1e-6})
     theta = res.x
 
-    # Intercept calibrated from pooled source prevalence (penalty is intercept-free)
+    # Intercept calibrated from the training-split prevalence (the IRMv1 penalty
+    # is intercept-free, so b is set analytically rather than optimised). This
+    # fixes the probability scale without fitting it, which is why IRM's ECE
+    # reflects that choice and not a calibration procedure — worth remembering
+    # before quoting it as a method's calibration.
     b_opt = float(np.log(y_src_all.mean() / (1 - y_src_all.mean() + 1e-8)))
 
     def _predict(X):
@@ -692,11 +750,14 @@ def fit_irm(
             ds.y, _predict(scaler.transform(ds.x)), ds.n)
 
     probs_tgt = _predict(X_tgt_s)
-    X_src_pool = np.vstack([X for X, _ in envs])
     return {
         "feature_set":    "irm",
         "source_domains": source_scores,
-        "source_pooled":  _score(y_src_all, _predict(X_src_pool), len(y_src_all)),
+        # Held-out source validation, as in every other method, so src_auroc and
+        # the derived `gap` column mean the same thing across the table.
+        "source_pooled":  _score(y_val_all,
+                                 _predict(scaler.transform(X_val_all)),
+                                 len(y_val_all)),
         "target":         _score(target_dataset.y, probs_tgt, target_dataset.n),
         "target_probs":   probs_tgt,
         "model":          {"theta": theta, "b": b_opt, "lam": lam},

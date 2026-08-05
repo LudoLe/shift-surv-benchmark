@@ -165,10 +165,15 @@ def fit_group_dro(
         )
 
     # Per-domain 80/20 split, keeping domain identity as the DRO group label.
+    # random_state=0, not `seed`: every other method splits its source with
+    # random_state=0, and the paired per-seed tests (max_statistic_test) assume
+    # all methods saw the same data within a seed. Using `seed` here meant
+    # GroupDRO trained on a different 80% than the ERM it is differenced
+    # against, putting split noise into the paired difference.
     tr_parts, val_parts, groups_idx = [], [], []
     for gi, ds in enumerate(source_datasets):
         X_tr, X_val, y_tr, y_val = train_test_split(
-            ds.x, ds.y, test_size=0.2, random_state=seed, stratify=ds.y,
+            ds.x, ds.y, test_size=0.2, random_state=0, stratify=ds.y,
         )
         tr_parts.append((X_tr, y_tr, gi))
         val_parts.append((X_val, y_val))

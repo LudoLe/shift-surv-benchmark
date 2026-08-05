@@ -74,15 +74,28 @@ def _se_from_ci(lo: float, hi: float) -> float:
     return (hi - lo) / (2.0 * _Z95)
 
 
-def load_transfers(prefix: str) -> tuple[list[str], dict]:
+def load_transfers(prefix: str, exclude: list[str] | None = None) -> tuple[list[str], dict]:
     """Return (transfer_names, data) where
     data[metric][method][transfer] = (gap, se), metric in {auroc, ece}.
+
+    The glob is a prefix match, so ``--prefix i3lung`` also picks up
+    ``i3lung_loco_*``: the six leave-one-center-out folds as well as the seven
+    center-to-center transfers. Those two designs are run on the SAME six
+    cohorts, so pooling all thirteen re-uses every target patient twice and the
+    random-effects model -- which assumes independent units -- returns intervals
+    that are too tight. That is a defensible reporting choice only if it is a
+    choice; it was previously a side effect of the glob. Pass ``exclude`` (CLI:
+    ``--exclude loco``) to keep the designs apart, and read the banner this
+    prints, which now names every file that went into the pool.
     """
     paths = sorted(glob.glob(str(_TABLES / f"{prefix}*_bootstrap.csv")))
+    for pat in (exclude or []):
+        paths = [p for p in paths if pat not in Path(p).name]
     if not paths:
         raise FileNotFoundError(
-            f"No '{prefix}*_bootstrap.csv' under {_TABLES}. "
-            f"Run experiments.run_real_data first."
+            f"No '{prefix}*_bootstrap.csv' under {_TABLES}"
+            + (f" after excluding {exclude}" if exclude else "")
+            + ". Run experiments.run_real_data first."
         )
     data: dict = {"auroc": {}, "ece": {}}
     transfers: list[str] = []
@@ -187,11 +200,34 @@ def _fmt(r: dict) -> str:
             f"p={r['p']:.3f}   I2={r['I2']:4.0f}%  tau2={r['tau2']:.5f}")
 
 
-def run(prefix: str, clinical_margin: float, out_prefix: str | None) -> None:
-    transfers, data = load_transfers(prefix)
+def _design_of(name: str) -> str:
+    """Which experimental design a transfer belongs to.
+
+    'loco_GHD' is a leave-one-center-out fold; 'INT_GHD' is a directed
+    center-to-center transfer. They share target cohorts, so pooling both means
+    the same patients enter the model twice.
+    """
+    return "leave-one-center-out" if name.startswith("loco") else "center-to-center"
+
+
+def run(prefix: str, clinical_margin: float, out_prefix: str | None,
+        exclude: list[str] | None = None) -> None:
+    transfers, data = load_transfers(prefix, exclude=exclude)
+    designs: dict[str, list[str]] = {}
+    for t in transfers:
+        designs.setdefault(_design_of(t), []).append(t)
+
     print(f"\n{'='*92}")
     print(f"  RANDOM-EFFECTS META-ANALYSIS (DerSimonian-Laird) — prefix '{prefix}'")
     print(f"  {len(transfers)} transfers: {', '.join(transfers)}")
+    for d, ts in sorted(designs.items()):
+        print(f"    {d:22s} k={len(ts):2d}  {', '.join(ts)}")
+    if len(designs) > 1:
+        print("  ! POOLING TWO DESIGNS. They are run on the same cohorts, so target")
+        print("    patients are counted more than once and DerSimonian-Laird's")
+        print("    independence assumption is violated: the pooled CIs below are")
+        print("    anticonservative. Either report the designs separately")
+        print(f"    (--exclude loco / --prefix {prefix}_loco) or state the dependence.")
     print(f"  Effect = adaptation - ERM (positive = adaptation better). "
           f"Clinical margin = {clinical_margin:+.3f}")
     print('='*92)
@@ -246,5 +282,10 @@ if __name__ == "__main__":
                     help="AUROC/ECE gain considered clinically meaningful (default: 0.02).")
     ap.add_argument("--out_prefix", default=None,
                     help="If set, write <out_prefix>_meta.csv (default: <prefix>).")
+    ap.add_argument("--exclude", nargs="*", default=None, metavar="SUBSTR",
+                    help="Drop bootstrap files whose name contains any of these "
+                         "substrings, e.g. --exclude loco to keep the "
+                         "center-to-center design separate from the LOCO folds.")
     args = ap.parse_args()
-    run(args.prefix, args.clinical_margin, args.out_prefix or args.prefix)
+    run(args.prefix, args.clinical_margin, args.out_prefix or args.prefix,
+        exclude=args.exclude)

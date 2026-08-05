@@ -37,7 +37,9 @@ from scipy import stats
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO_TABLES = os.path.join(ROOT, "outputs", "tables")
-PRIOR_TABLES = os.path.expanduser("~/Downloads/shift-surv-outputs/tables")
+# benchmark_1s1t_prior_raw.csv is in the repo now; defaulting to a download
+# folder meant the significance stars could not be recomputed from a clone.
+PRIOR_TABLES = REPO_TABLES
 
 ERM = "all_observed"
 ADAPT = ["coral", "dann", "cdan", "iw_erm"]          # discrimination families

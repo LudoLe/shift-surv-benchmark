@@ -404,9 +404,10 @@ def _fit_posthoc_calib(
         # with run_real_data via utils.calibration, which also guards against a
         # non-increasing fit reversing the ranking instead of calibrating it.
         from utils.calibration import fit_platt
-        p_val_c, p_tgt_c, calibrator, _ = fit_platt(p_val_raw, y_val, p_tgt_raw)
+        p_val_c, p_tgt_c, calibrator, fell_back = fit_platt(p_val_raw, y_val, p_tgt_raw)
         feature_set = "platt_scaling"
     else:
+        fell_back = False
         iso = IsotonicRegression(out_of_bounds="clip")
         iso.fit(p_val_raw, y_val)
         p_val_c = iso.predict(p_val_raw)
@@ -429,8 +430,16 @@ def _fit_posthoc_calib(
     source_scores = {}
     for ds in source_datasets:
         p_d_raw = base_lr.predict_proba(scaler.transform(ds.x))[:, 1]
-        p_d_c   = (calibrator.predict_proba(p_d_raw.reshape(-1, 1))[:, 1]
-                   if calib_method == "sigmoid" else calibrator.predict(p_d_raw))
+        if fell_back:
+            # The Platt fit was rejected as non-increasing, so source_pooled and
+            # target both report the uncalibrated probabilities. Applying the
+            # rejected map here anyway would make the per-domain diagnostics
+            # describe a model that was never scored.
+            p_d_c = p_d_raw
+        elif calib_method == "sigmoid":
+            p_d_c = calibrator.predict_proba(p_d_raw.reshape(-1, 1))[:, 1]
+        else:
+            p_d_c = calibrator.predict(p_d_raw)
         source_scores[f"source_d{ds.domain_id}"] = _sc(ds.y, p_d_c)
 
     return {

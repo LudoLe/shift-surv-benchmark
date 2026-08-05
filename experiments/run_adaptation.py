@@ -451,7 +451,9 @@ def _plot_calibration_curves(
     """
     Plot reliability diagrams from pre-aggregated calibration data.
 
-    calib_data[scenario][method] = (mean_pred_prob, fraction_pos)
+    calib_data[scenario][method] = (fraction_pos, mean_pred_prob) -- the order
+    sklearn's calibration_curve returns, which is what the caller stores and
+    what this function unpacks.
     One PNG per scenario, one curve per method.
     """
     from sklearn.calibration import calibration_curve as _cal_curve

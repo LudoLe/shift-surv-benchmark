@@ -1,9 +1,4 @@
 """Post-hoc probability calibration, shared by the synthetic and real-data paths.
-
-This exists because the Platt block was duplicated verbatim in
-``experiments/baselines._fit_posthoc_calib`` and ``experiments/run_real_data._run_seed``,
-with a comment in the latter asserting the two were identical. They were -- including
-a bug. Sharing the implementation makes that assertion true by construction.
 """
 from __future__ import annotations
 
@@ -55,16 +50,21 @@ def fit_platt(
     so it only surfaces when seeds are evaluated separately.
 
     When ``a <= 0`` the calibration set does not support a valid Platt fit, so we
-    fall back to the uncalibrated probabilities. That keeps the rank-preservation
-    invariant true by construction, at the cost of leaving that seed
-    uncalibrated -- which is the honest outcome, since a decreasing "calibration"
-    is not a better answer than no calibration.
-
+    fall back to the uncalibrated probabilities. 
     Set ``guard_monotone=False`` to reproduce the pre-fix behaviour.
     """
     p_val = np.asarray(p_val, dtype=float).ravel()
     p_tgt = np.asarray(p_tgt, dtype=float).ravel()
     y_val = np.asarray(y_val).astype(int).ravel()
+
+    if len(np.unique(y_val)) < 2:
+        warnings.warn(
+            "Platt scaling requires both classes in the validation split; "
+            "falling back to uncalibrated probabilities.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return p_val.copy(), p_tgt.copy(), None, True
 
     platt = LogisticRegression(C=1e6, solver="lbfgs", max_iter=1000, random_state=0)
     platt.fit(p_val.reshape(-1, 1), y_val)
