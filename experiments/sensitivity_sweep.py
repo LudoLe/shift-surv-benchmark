@@ -321,7 +321,8 @@ def _draw(spec, rng):
 _CFG_DIR = Path(tempfile.mkdtemp(prefix="shift_surv_sweep_"))
 
 
-def _config_for(lambda0: float, nu: float, w: list[float]) -> str | None:
+def _config_for(lambda0: float, nu: float, w: list[float],
+                sigma: float) -> str | None:
     """Write (once per distinct configuration) a config with these domain defaults.
 
     Returns the path, or None when everything is at the benchmark's own values,
@@ -330,18 +331,25 @@ def _config_for(lambda0: float, nu: float, w: list[float]) -> str | None:
     """
     is_bench = (lambda0 == AXES["lambda0"]["default"]
                 and nu == AXES["nu"]["default"]
+                and sigma == AXES["sigma"]["default"]
                 and len(w) == len(W_BENCH)
                 and np.allclose(w, W_BENCH))
     if is_bench:
         return None
     import yaml
-    tag = f"{lambda0:.6g}_{nu:.6g}_" + "_".join(f"{x:.4f}" for x in w)
+    tag = f"{lambda0:.6g}_{nu:.6g}_{sigma:.6g}_" + "_".join(f"{x:.4f}" for x in w)
     path = _CFG_DIR / f"cfg_{tag}.yaml"
     if not path.exists():
         cfg = yaml.safe_load(_CONFIG.read_text())
         cfg["domain_defaults"].update(
             {"lambda0": float(lambda0), "nu": float(nu),
              "w": [float(x) for x in w],
+             # sigma has to travel through domain_defaults, not only through the
+             # source_sigma_base keyword: four of the six scenario functions do
+             # not take that keyword, so the axis was inert for them and their
+             # four sigma rows came out identical -- reading as "sigma does not
+             # matter" when sigma had never moved.
+             "sigma_noise": float(sigma),
              # v must match k_spu; the generator pads/truncates, but writing it
              # explicitly keeps the emitted config self-consistent and readable.
              "v": [0.0] * len(cfg["domain_defaults"].get("v", [0.0, 0.0]))})
@@ -368,7 +376,8 @@ def _kwargs_for(regime: str, cfgv: dict) -> tuple[dict, dict]:
         scen_kw["source_lambda0_base"] = float(cfgv["lambda0"])
         scen_kw["source_nu"] = float(cfgv["nu"])
         scen_kw["nu_target"] = float(cfgv["nu"])
-    # spurious_shift and prior_shift take no sigma kwarg.
+    # Four scenario functions take no sigma keyword; for them sigma arrives
+    # through domain_defaults instead (see _config_for).
     if regime in ("spurious_shift", "prior_shift", "baseline_hazard_shift", "concept_shift"):
         scen_kw.pop("source_sigma_base", None)
 
@@ -399,7 +408,8 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
 
     base_kw, scen_kw = _kwargs_for(regime, cfgv)
     w_vec = _w_vector(cfgv["w_shape"], float(cfgv["w_norm"]), int(cfgv["k_inv"]))
-    cfg_path = _config_for(cfgv["lambda0"], cfgv["nu"], w_vec)
+    cfg_path = _config_for(cfgv["lambda0"], cfgv["nu"], w_vec,
+                           float(cfgv["sigma"]))
 
     family = ["coral", "iw_erm"]
     if n_src >= 2:
