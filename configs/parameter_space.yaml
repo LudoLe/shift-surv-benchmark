@@ -16,8 +16,13 @@
 # calibration and the finite samples used for the replicates themselves.
 #
 # Every level is tagged:
-#   realism  chosen to resemble what the two real cohorts exhibit
-#   stress   deliberately more extreme, to probe where the conclusion fails
+#   realism     chosen to resemble what the two real cohorts exhibit
+#   stress      deliberately more extreme, to probe where the conclusion fails
+#   structural  a pre-specified alternative latent structure. Neither realistic
+#               nor extreme: the number and shape of latent factors are not
+#               observable in the cohorts, so calling them either would claim an
+#               empirical anchor that does not exist. k_inv, k_spu and w_shape
+#               are all of this kind.
 # The paper must not describe the whole grid as realistic. It contains an
 # application-calibrated region AND explicit stress regimes, and says so.
 #
@@ -32,7 +37,12 @@ meta:
   frozen_on: "2026-08-05"
   frozen_before_results: true
   margin_auroc: 0.02          # same pre-specified margin as configs/generator.yaml
-  headroom_threshold: 0.02    # below this a configuration cannot test the claim
+  # Below this the configuration has less than the pre-specified practical
+  # margin of observed-data headroom and is treated as weakly informative for
+  # testing a reversal. Not "cannot test": the observed-data oracle is itself
+  # estimated and is not an exact upper bound. The continuous headroom is
+  # reported on every row regardless.
+  headroom_threshold: 0.02
 
 # ---- Observed ranges the realism cells are calibrated against ---------------
 # Recorded here so the grid's coverage claim is auditable rather than asserted.
@@ -48,8 +58,12 @@ reference_cohorts:
     erm_target_auroc: [0.66, 0.70]
     p_over_n_train: [0.003, 0.012]
   coverage_statement: >
-    The realism levels bracket both cohorts on minority-class fraction and on
-    latent/observed discrimination. On p/n the grid now spans 0.0013 to 0.40,
+    The realism levels bracket the observed minority-class fractions and the
+    empirical ERM AUROC range of the two cohorts. The latent-oracle and
+    observed-oracle targets are controlled synthetic quantities used to vary
+    recoverability and measurement difficulty; they are NOT observed in the real
+    cohorts, and the grid is not claimed to bracket them. On p/n the grid spans
+    0.0013 to 0.40,
     which contains both cohorts (I3LUNG 0.016-0.058, registry 0.003-0.012): the
     n=10000 stress level reaches 0.0025 at p=20, below the registry's own
     minimum. That level is one-at-a-time only; the joint sampling stops at
@@ -108,7 +122,7 @@ calibrated_parameters:
       - {target: 0.70, tag: realism, note: "weak prognostic signal"}
       - {target: 0.82, tag: realism, note: "benchmark default"}
       - {target: 0.90, tag: realism, note: "strong but attainable clinically"}
-      - {target: 0.97, tag: stress,  note: "beyond any real tabular clinical model"}
+      - {target: 0.97, tag: stress,  note: "deliberately extreme relative to the cohorts' empirical AUROC range"}
 
   sigma:
     controls: observed_oracle_auroc
@@ -176,29 +190,29 @@ direct_parameters:
     # coefficient and k_inv>3 adds inert factors. Neither is "the same benchmark
     # with more factors"; the sweep reports the realised w alongside.
     levels:
-      - {value: 2, tag: realism}
-      - {value: 3, tag: realism, note: "benchmark default"}
-      - {value: 4, tag: stress}
-      - {value: 5, tag: stress}
+      - {value: 2, tag: structural}
+      - {value: 3, tag: structural, note: "benchmark default"}
+      - {value: 4, tag: structural}
+      - {value: 5, tag: structural}
 
   k_spu:
     controls: n_spurious_latent_factors
     levels:
-      - {value: 1, tag: realism}
-      - {value: 2, tag: realism, note: "benchmark default"}
-      - {value: 3, tag: stress}
-      - {value: 4, tag: stress}
+      - {value: 1, tag: structural}
+      - {value: 2, tag: structural, note: "benchmark default"}
+      - {value: 3, tag: structural}
+      - {value: 4, tag: structural}
 
   w_shape:
     controls: direction_of_w_at_fixed_norm
     # Shape is varied at fixed norm so it is separated from signal strength.
     # It also fixes the concept-shift cosine, which is reported per row.
     levels:
-      - {value: benchmark,    tag: realism, note: "(1, 0.5, -0.5); cosine 1/3; benchmark default"}
-      - {value: single,       tag: stress,  note: "one factor carries everything"}
-      - {value: equal_signed, tag: realism}
-      - {value: equal_same,   tag: stress,  note: "was degenerate before the _orthogonal_to fix"}
-      - {value: asymmetric,   tag: realism}
+      - {value: benchmark,    tag: structural, note: "(1, 0.5, -0.5); benchmark default"}
+      - {value: single,       tag: structural, note: "one factor carries everything"}
+      - {value: equal_signed, tag: structural}
+      - {value: equal_same,   tag: structural, note: "was degenerate before the _orthogonal_to fix"}
+      - {value: asymmetric,   tag: structural}
 
 # ---- Per-regime severity, one knob each ------------------------------------
 # rho is frozen by the pre-specified pilot (experiments/pilot_spurious_rho.py)
@@ -218,18 +232,31 @@ shift_amplitude:
     levels: [{value: 0.5, tag: realism}, {value: 0.7, tag: realism, note: default},
              {value: 0.95, tag: stress}]
   baseline_hazard_shift:
-    kwarg: lambda0_target
-    levels: [{value: 0.03, tag: realism}, {value: 0.06, tag: realism, note: default},
-             {value: 0.15, tag: stress}]
+    # A multiplier on the source rate, not a raw lambda0. The meaning of an
+    # absolute 0.15 depends on nu, on ||w|| and on tau, so it is a different
+    # severity in every world; a multiplier is the same "three times the source
+    # rate" everywhere. 3.0 reproduces the benchmark, whose source is 0.02 and
+    # target 0.06.
+    kwarg: lambda0_multiplier
+    levels: [{value: 1.5, tag: realism}, {value: 3.0, tag: realism, note: default},
+             {value: 7.5, tag: stress}]
   prior_shift:
     kwarg: prevalence_target
     levels: [{value: 0.45, tag: realism}, {value: 0.60, tag: realism, note: default},
              {value: 0.80, tag: stress}]
   concept_shift:
+    # Declared by the source-target cosine, not by which indices to flip. The
+    # same indices give a different cosine for a different w: at k_inv=2 the
+    # benchmark shape becomes (1.095, 0.548) and flipping (1,2) yields 0.60
+    # rather than 1/3, so an index list is not a severity level -- it is a
+    # different severity in every world. The sweep picks, per configuration, the
+    # index subset whose cosine is closest to the target, and records what it
+    # achieved.
     kwarg: w_flip_indices
-    levels: [{value: [2],       tag: realism, note: "cosine +0.67"},
-             {value: [1, 2],    tag: realism, note: "cosine +1/3; default"},
-             {value: [0, 1, 2], tag: stress,  note: "cosine -1, full reversal"}]
+    parameterised_by: source_target_cosine
+    levels: [{value: 0.67,  tag: structural, note: "mild reversal of the subordinates"},
+             {value: 0.333, tag: structural, note: "benchmark default"},
+             {value: -1.0,  tag: structural, note: "full reversal of w"}]
 
 # ---- Protocol, fixed before the sweep --------------------------------------
 # ---- Constraints on joint draws -------------------------------------------
@@ -260,9 +287,12 @@ protocol:
   # the 0.90-0.97 targets, so the bisection was chasing noise there.
   superpopulation_n: 100000    # fixed population used only for calibration
   superpopulation_seed: 999
-  decision_rule:
-    supported:      "gain 95% upper limit < margin"
-    inconclusive:   "interval spans the margin"
-    candidate_break: "point estimate > margin but lower limit <= margin"
-    breaks:         "gain 95% lower limit > margin"
-    uninformative:  "headroom point estimate < headroom_threshold"
+  # Evaluated in this order and the first match wins. Without a stated
+  # precedence "interval spans the margin" and "point estimate above the margin"
+  # can both hold for one row, which would leave it with two valid verdicts.
+  decision_rule_precedence:
+    - {verdict: uninformative,   test: "headroom point estimate < headroom_threshold"}
+    - {verdict: BREAK,           test: "gain 95% lower limit > margin"}
+    - {verdict: candidate_break, test: "gain point estimate > margin"}
+    - {verdict: inconclusive,    test: "gain 95% upper limit >= margin"}
+    - {verdict: supported,       test: "otherwise"}

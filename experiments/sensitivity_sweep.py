@@ -281,12 +281,9 @@ def _load_space() -> tuple[dict, dict, dict]:
     amplitude: dict = {}
     for regime, spec in space["shift_amplitude"].items():
         vals = [lv["value"] for lv in spec["levels"]]
-        vals = [tuple(v) if isinstance(v, list) else v for v in vals]
-        dflt = next((tuple(lv["value"]) if isinstance(lv["value"], list) else lv["value"]
-                     for lv in spec["levels"] if "default" in (lv.get("note") or "")),
-                    vals[len(vals) // 2])
-        draw = (("choice", None, None) if spec["kwarg"] == "w_flip_indices"
-                else ("lin", min(vals), max(vals)))
+        dflt = next((lv["value"] for lv in spec["levels"]
+                     if "default" in (lv.get("note") or "")), vals[len(vals) // 2])
+        draw = ("lin", min(vals), max(vals))
         amplitude[regime] = dict(kwarg=spec["kwarg"], grid=vals, default=dflt, draw=draw,
                                  semantic={v: (None, None, lv["tag"])
                                            for v, lv in zip(vals, spec["levels"])})
@@ -298,7 +295,10 @@ MARGIN = float(SPACE["meta"]["margin_auroc"])
 HEADROOM_MIN = float(SPACE["meta"]["headroom_threshold"])
 PROTOCOL = SPACE["protocol"]
 MAX_K_OVER_P = float(SPACE.get("constraints", {}).get("max_k_over_p", 0.5))
-_CONCEPT_CHOICES = [tuple(lv["value"]) for lv
+# Concept severity is a cosine now, so it is continuous and the worlds mode
+# draws it on a range instead of picking from a list. The indices realising it
+# are solved per configuration.
+_CONCEPT_COSINES = [float(lv["value"]) for lv
                     in SPACE["shift_amplitude"]["concept_shift"]["levels"]]
 
 
@@ -339,7 +339,7 @@ def _draw(spec, rng):
     if kind == "lin":
         return float(rng.uniform(lo, hi))
     if kind == "choice":
-        return _CONCEPT_CHOICES[int(rng.integers(0, len(_CONCEPT_CHOICES)))]
+        return float(rng.uniform(min(_CONCEPT_COSINES), max(_CONCEPT_COSINES)))
     if kind == "sphere":
         # Direction drawn uniformly on the unit sphere: a standard normal vector
         # normalised. Length 5 covers the largest k_inv in the grid; _w_vector
@@ -393,6 +393,31 @@ def _config_for(lambda0: float, nu: float, w: list[float],
     return str(path)
 
 
+def _flip_for_cosine(w: list[float], target_cos: float) -> tuple:
+    """The index subset whose sign flip lands closest to ``target_cos``.
+
+    Flipping the coefficients in J gives cos = 1 - 2*sum_{j in J} w_j^2/||w||^2,
+    so a fixed index list is a fixed severity only for a fixed w. It is not: at
+    k_inv=2 the benchmark shape becomes (1.095, 0.548) and flipping (1,2) yields
+    0.60 rather than 1/3. Declaring the cosine and solving for the indices makes
+    the level mean the same thing in every configuration, which is what a
+    severity level has to do.
+
+    k_inv is at most 5 here, so all 2^k subsets are enumerated exactly. The empty
+    subset is excluded: it is not a concept shift.
+    """
+    import itertools
+    w = np.asarray(w, dtype=float)
+    n2 = float(np.dot(w, w))
+    best, best_err = (0,), float("inf")
+    for r in range(1, len(w) + 1):
+        for J in itertools.combinations(range(len(w)), r):
+            c = 1.0 - 2.0 * float(np.sum(w[list(J)] ** 2)) / n2
+            if abs(c - target_cos) < best_err:
+                best, best_err = J, abs(c - target_cos)
+    return best
+
+
 def _concept_cosine(w: list[float], flip) -> float:
     """Source-target cosine of w under a concept flip of the indices in ``flip``."""
     w = np.asarray(w, dtype=float)
@@ -424,7 +449,15 @@ def _kwargs_for(regime: str, cfgv: dict) -> tuple[dict, dict]:
         if key.endswith("_deg"):
             scen_kw["a_inv_rotation_angle"] = float(np.radians(amp))
         elif key == "w_flip_indices":
-            scen_kw[key] = tuple(amp)
+            # The level is a target cosine; the indices that realise it depend on
+            # the w of this particular configuration.
+            w_here = _w_vector(cfgv["w_shape"], float(cfgv["w_norm"]), int(cfgv["k_inv"]))
+            scen_kw[key] = _flip_for_cosine(w_here, float(amp))
+        elif key == "lambda0_multiplier":
+            # Relative to this configuration's own source rate, so "three times
+            # the source" means the same thing whatever nu, ||w|| and tau are.
+            scen_kw["source_lambda0_base"] = float(cfgv["lambda0"])
+            scen_kw["lambda0_target"] = float(cfgv["lambda0"]) * float(amp)
         else:
             scen_kw[key] = amp
             if regime == "covariate_shift":
@@ -445,6 +478,7 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
         fit_all_observed, fit_invariant_oracle, fit_observed_target_oracle)
     from experiments.adaptation_methods import fit_coral, fit_iw_erm
 
+    cfgv = dict(cfgv, _is_concept=(regime == "concept_shift"))
     base_kw, scen_kw = _kwargs_for(regime, cfgv)
     w_vec = _w_vector(cfgv["w_shape"], float(cfgv["w_norm"]), int(cfgv["k_inv"]))
     cfg_path = _config_for(cfgv["lambda0"], cfgv["nu"], w_vec,
@@ -563,9 +597,16 @@ def _flat(cfgv: dict) -> dict:
     out["amplitude"] = str(cfgv.get("amplitude"))
     w = _w_vector(cfgv["w_shape"], float(cfgv["w_norm"]), int(cfgv["k_inv"]))
     out["w"] = "[" + ",".join(f"{x:.3f}" for x in w) + "]"
+    # The achieved cosine, not the requested one: the subset that realises a
+    # target exactly may not exist for a given w, and the row has to say what it
+    # actually got.
     amp = cfgv.get("amplitude")
-    out["concept_cos"] = (round(_concept_cosine(w, amp), 4)
-                          if isinstance(amp, (tuple, list)) else "")
+    if isinstance(amp, (int, float)) and cfgv.get("_is_concept"):
+        out["concept_cos_target"] = round(float(amp), 4)
+        out["concept_cos"] = round(_concept_cosine(w, _flip_for_cosine(w, float(amp))), 4)
+    else:
+        out["concept_cos_target"] = ""
+        out["concept_cos"] = ""
     return out
 
 
@@ -618,8 +659,8 @@ def _from_unit(spec, u: float):
     if kind == "lin":
         return float(lo + u * (hi - lo))
     if kind == "choice":
-        return _CONCEPT_CHOICES[min(len(_CONCEPT_CHOICES) - 1,
-                                    int(u * len(_CONCEPT_CHOICES)))]
+        _lo, _hi = min(_CONCEPT_COSINES), max(_CONCEPT_COSINES)
+        return float(_lo + u * (_hi - _lo))
     raise ValueError(kind)
 
 
