@@ -89,6 +89,24 @@ export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
        TF_NUM_INTRAOP_THREADS=1 TF_NUM_INTEROP_THREADS=1 \
        TF_CPP_MIN_LOG_LEVEL=3
 
+# Pin each job to one CPU. The library environment variables help but do not
+# finish the job: measured, a worker holds 14 native threads with them set and 36
+# without, and those pools size themselves to the machine -- on a 192-core server
+# that came to 175 threads per process, 11181 in total across 64 workers, load
+# average 381. Python's threading.active_count() reports 1 either way, because
+# the pools are native and invisible to it, which is why this went unnoticed.
+#
+# taskset makes the kernel enforce what the libraries would not: the threads
+# still exist, but they share one core, so sixty-four workers occupy sixty-four
+# cores no matter how many pools TensorFlow decides to open.
+if command -v taskset >/dev/null 2>&1; then
+  PIN=1
+else
+  PIN=0
+  echo "  nota: taskset non disponibile, i job non saranno vincolati a una CPU"
+  echo "        (su questa macchina il rischio e' sovrascrizione: riduci JOBS)"
+fi
+
 # A sanity check worth the two seconds: if a job still opens more than a couple
 # of threads, the whole parallel plan is wrong and it is better to find out now
 # than four hours in.
@@ -98,12 +116,11 @@ import experiments.adaptation_methods  # noqa: F401
 print(threading.active_count())
 PYEOF
 )"
-if [ -n "${_THR:-}" ] && [ "$_THR" -gt 4 ]; then
-  echo "ATTENZIONE: un processo apre $_THR thread dopo l'import di TensorFlow."
-  echo "            Con $JOBS job paralleli il server andra' in thrashing."
-  echo "            Controlla che experiments/adaptation_methods.py imposti"
-  echo "            TF_NUM_INTRAOP_THREADS prima dell'import di adapt."
-  exit 1
+# Informative only: threading.active_count() cannot see the native pools that
+# actually caused the oversubscription, so this check never had the power to
+# catch it. taskset is what makes the job safe; this just reports.
+if [ -n "${_THR:-}" ]; then
+  echo "  thread Python per processo: $_THR (i pool nativi non sono visibili qui)"
 fi
 
 if [ ! -f configs/parameter_space_calibrated.yaml ]; then
@@ -168,7 +185,13 @@ for job in "${jobs_list[@]}"; do
   while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n 2>/dev/null || sleep 5; done
   echo "  [$(date +%T)] start  $name"
   # shellcheck disable=SC2086
-  nice -n "$NICE" python -m experiments.sensitivity_sweep \
+  if [ "$PIN" = 1 ]; then
+    CPU=$(( ${#pids[@]} % NCORES ))
+    PREFIX=(taskset -c "$CPU" nice -n "$NICE")
+  else
+    PREFIX=(nice -n "$NICE")
+  fi
+  "${PREFIX[@]}" python -m experiments.sensitivity_sweep \
       --mode "$mode" --n_source_domains "$nsrc" --regimes "$reg" \
       --n_seeds "$N_SEEDS" --out_prefix "$name" $extra \
       > "outputs/logs/${name}.log" 2>&1 &
@@ -220,7 +243,8 @@ for nsrc in 1 3; do
   if [ ${#srcs[@]} -eq 0 ]; then echo "  nessun CSV di screening per ${nsrc} sorgente/i"; continue; fi
   name="sens_confirm_${nsrc}src"
   echo "  [$(date +%T)] start  $name  (da ${srcs[*]})"
-  nice -n "$NICE" python -m experiments.sensitivity_sweep --mode confirm \
+  taskset_pfx=(); command -v taskset >/dev/null 2>&1 && taskset_pfx=(taskset -c 0-$(( NCORES/4 )))
+  "${taskset_pfx[@]}" nice -n "$NICE" python -m experiments.sensitivity_sweep --mode confirm \
       --n_source_domains "$nsrc" --confirm_from "${srcs[@]}" \
       --n_seeds "$N_SEEDS" --out_prefix "$name" \
       > "outputs/logs/${name}.log" 2>&1 \
