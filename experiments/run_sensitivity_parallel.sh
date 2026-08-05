@@ -14,8 +14,15 @@
 # Usage:
 #   ./experiments/run_sensitivity_parallel.sh [JOBS] [N_SEEDS]
 #
-#   JOBS     concurrent processes (default: half the cores, capped at 12)
+#   JOBS     concurrent processes (default: a quarter of the cores)
 #   N_SEEDS  seeds per configuration (default: 10)
+#
+# On a shared machine, read the load before choosing JOBS. Every job is one
+# thread after the TensorFlow settings below, so JOBS is very nearly the number
+# of cores this run will occupy. The jobs are also niced, so they yield to
+# anyone else's work rather than competing with it: on an idle machine that
+# costs nothing, and on a busy one it is the difference between finishing
+# slightly later and making everyone else's day worse.
 #
 # Run experiments/calibrate.py first: without configs/parameter_space_calibrated.yaml
 # the sweep exits immediately.
@@ -25,9 +32,29 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 NCORES="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
-JOBS="${1:-$(( NCORES / 2 ))}"
+JOBS="${1:-$(( NCORES / 4 ))}"
 N_SEEDS="${2:-10}"
 (( JOBS < 1 )) && JOBS=1
+
+# Leave room for whoever else is on the machine. The one-minute load average is
+# a fair estimate of how many cores are already busy; asking for more than what
+# is left slows everybody down, this run included.
+NICE="${NICE:-10}"
+if [ -r /proc/loadavg ]; then
+  LOAD1="$(awk '{printf "%d", $1}' /proc/loadavg)"
+  FREE_CORES=$(( NCORES - LOAD1 ))
+  (( FREE_CORES < 1 )) && FREE_CORES=1
+  # Two thirds of what is free, so the machine does not sit at exactly 100%.
+  POLITE=$(( FREE_CORES * 2 / 3 ))
+  (( POLITE < 1 )) && POLITE=1
+  if (( JOBS > POLITE )); then
+    echo "  load attuale ${LOAD1} su ${NCORES} thread -> ~${FREE_CORES} liberi"
+    echo "  $JOBS job richiesti, limito a $POLITE per lasciare spazio agli altri"
+    echo "  (per forzare: JOBS_FORCE=1 ./$(basename "$0") $JOBS)"
+    [ "${JOBS_FORCE:-0}" = 1 ] || JOBS=$POLITE
+  fi
+fi
+echo "  $JOBS job concorrenti, nice $NICE"
 
 # No hard cap on a big machine, but memory is the binding constraint rather than
 # cores: DANN and CDAN run on TensorFlow and every process reserves its own
@@ -141,7 +168,7 @@ for job in "${jobs_list[@]}"; do
   while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n 2>/dev/null || sleep 5; done
   echo "  [$(date +%T)] start  $name"
   # shellcheck disable=SC2086
-  python -m experiments.sensitivity_sweep \
+  nice -n "$NICE" python -m experiments.sensitivity_sweep \
       --mode "$mode" --n_source_domains "$nsrc" --regimes "$reg" \
       --n_seeds "$N_SEEDS" --out_prefix "$name" $extra \
       > "outputs/logs/${name}.log" 2>&1 &
@@ -193,7 +220,7 @@ for nsrc in 1 3; do
   if [ ${#srcs[@]} -eq 0 ]; then echo "  nessun CSV di screening per ${nsrc} sorgente/i"; continue; fi
   name="sens_confirm_${nsrc}src"
   echo "  [$(date +%T)] start  $name  (da ${srcs[*]})"
-  python -m experiments.sensitivity_sweep --mode confirm \
+  nice -n "$NICE" python -m experiments.sensitivity_sweep --mode confirm \
       --n_source_domains "$nsrc" --confirm_from "${srcs[@]}" \
       --n_seeds "$N_SEEDS" --out_prefix "$name" \
       > "outputs/logs/${name}.log" 2>&1 \
