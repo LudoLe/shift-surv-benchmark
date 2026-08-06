@@ -47,6 +47,7 @@ from sklearn.preprocessing import StandardScaler
 
 from generator.base_generator import DomainDataset
 from utils.metrics import auroc, auprc, ece, prevalence, f1, sensitivity, specificity
+from experiments import hparams
 
 
 def _score(y_true: np.ndarray, probs: np.ndarray, n: int) -> dict:
@@ -144,7 +145,7 @@ def fit_group_dro(
     target_dataset: DomainDataset,
     seed: int = 0,
     lr: float = 0.05,
-    q_lr: float = 0.02,
+    q_lr: float | None = None,
     l2: float = 1e-3,
     steps: int = 3000,
 ) -> dict:
@@ -158,6 +159,7 @@ def fit_group_dro(
     Returns the standard SHIFT-SURV result dict (feature_set, source_domains,
     source_pooled, target, target_probs, model, scaler).
     """
+    q_lr = hparams.get("group_dro", q_lr)
     if len(source_datasets) < 2:
         warnings.warn(
             "fit_group_dro called with <2 source domains: GroupDRO reduces to ERM. "

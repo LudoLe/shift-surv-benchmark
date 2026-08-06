@@ -1,0 +1,121 @@
+# ============================================================================
+# SHIFT-SURV hyperparameter search space
+# ----------------------------------------------------------------------------
+# FROZEN before tuning runs, like configs/parameter_space.yaml. The grid below
+# is what will be searched; the values selected from it are written to
+# configs/hyperparameters_selected.yaml by experiments/tune.py and are then
+# fixed for every benchmark, sensitivity and confirmation run.
+#
+# Why a separate tuning stage
+# ---------------------------
+# Previously only DANN and CDAN had a search, over ten candidates by
+# importance-weighted cross-validation, while CORAL, IW-ERM, IRM, GroupDRO and
+# ERM itself ran at one fixed value each. That asymmetry is not defensible: a
+# claim that no method beats ERM is unverified for any method whose single
+# setting was never checked, and the direction of the bias is unknown. It also
+# cuts the other way -- tuning the adaptation methods while leaving the baseline
+# fixed would make the comparison generous to adaptation -- so ERM is tuned too.
+#
+# Three rules, all of which follow from the protocol rather than from taste:
+#
+#   1. Tuning runs on its own seed block, disjoint from the screening seeds
+#      (0-9) and the confirmation seeds (100-119). Selecting on the seeds you
+#      later evaluate on is leakage, however innocuous the parameter.
+#
+#   2. One set per method per protocol, not one per regime. A deployable
+#      protocol cannot retune when the shift changes, because it does not know
+#      which shift it faces. Per-regime tuning would also fold the selection
+#      into the noise the confirmation stage is there to remove.
+#
+#   3. The selection criterion never sees target labels. Adaptation methods,
+#      which observe unlabeled target covariates, are selected by
+#      importance-weighted cross-validation on the source validation split.
+#      Domain-generalization methods, which do not observe the target at all,
+#      are selected by leave-one-source-out validation across source centers.
+#
+# Architecture, optimizer, batch size and epoch budget are held fixed for the
+# neural methods. Searching those as well turns the comparison into a contest of
+# compute budget rather than of transport ability.
+# ============================================================================
+
+meta:
+  frozen_on: "2026-08-06"
+  frozen_before_tuning: true
+  tuning_seeds: [200, 201, 202, 203, 204, 205, 206, 207, 208, 209]
+  # One regime from each of the three families of Table I, so the selected
+  # values are not fitted to a single kind of shift.
+  tuning_regimes: [covariate_shift, observational_shift, concept_shift]
+  n_per_domain: 500
+
+selection_rule:
+  adaptation: >
+    Importance-weighted AUROC on the held-out source validation split, with
+    weights from a domain classifier trained on source-train against unlabeled
+    target covariates. Uses the target only through its covariates.
+  domain_generalization: >
+    Leave-one-source-out AUROC: fit on all but one source center, score on the
+    held-out source. Never observes the target, in covariates or labels.
+  aggregation: >
+    Mean of the criterion over tuning seeds and tuning regimes; the argmax is
+    selected once and frozen.
+
+# ---- Grids ------------------------------------------------------------------
+# Small on purpose. The point is to establish that the reported result is not an
+# artefact of one arbitrary setting, not to find each method's optimum.
+
+grids:
+
+  erm:
+    protocol: both
+    # sklearn parameterizes by C = 1 / (l2 strength), so the l2 values
+    # {1e-4 ... 1} correspond to C in {1e4 ... 1}. Tuned so the baseline is not
+    # handicapped relative to the methods it is compared against.
+    C: [1.0, 10.0, 100.0, 1000.0, 10000.0]
+
+  iw_erm:
+    protocol: adaptation
+    # The clip bounds on the estimated density ratio. Wide bounds admit extreme
+    # weights and high variance; narrow bounds shrink toward unweighted ERM.
+    # The ratio is normalized to unit mean after clipping in all cases.
+    clip: [[0.1, 10.0], [0.05, 20.0], [0.02, 50.0]]
+
+  coral:
+    protocol: adaptation
+    # Shrinkage added to both covariance estimates before the matrix square
+    # roots. Not a free parameter of classical CORAL, but it is one here: at
+    # p=20 with 400 training rows the sample covariance needs regularizing, and
+    # the amount was never checked.
+    shrinkage: [0.1, 0.3, 1.0, 3.0, 10.0]
+
+  dann:
+    protocol: adaptation
+    adversarial_weight: [0.01, 0.1, 1.0]
+    encoder_width: [16, 32, 64]
+    # Fixed: two-layer encoder, RMSprop, batch size 64, 30 search epochs and
+    # 100 final epochs with early stopping.
+
+  cdan:
+    protocol: adaptation
+    adversarial_weight: [0.01, 0.1, 1.0]
+    encoder_width: [16, 32, 64]
+
+  irm:
+    protocol: domain_generalization
+    penalty_weight: [1.0, 10.0, 100.0, 1000.0]
+
+  group_dro:
+    protocol: domain_generalization
+    group_lr: [0.01, 0.1, 1.0]
+    # Optimizer learning rate, L2 and step budget stay fixed; early stopping on
+    # a source-only split is part of the method, not a tuned quantity.
+
+  # No substantive hyperparameter. Recorded so the table is complete and so
+  # that "not tuned" is a statement about the method rather than an omission.
+  prior_recalib:
+    protocol: adaptation
+    note: "EM to convergence; tolerance 1e-7, at most 50 iterations"
+
+  platt:
+    protocol: adaptation
+    note: "Monotone increasing logistic fit on the source validation split;
+           non-increasing fits are rejected and fall back to uncalibrated"

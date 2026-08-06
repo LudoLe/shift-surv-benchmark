@@ -38,7 +38,13 @@ from generator.base_generator import DomainDataset
 from utils.metrics import auroc, auprc, ece, prevalence, f1, sensitivity, specificity
 
 
-_LR_KWARGS = dict(max_iter=500, solver="lbfgs", C=1.0, random_state=0)
+from experiments import hparams as _hp
+# Shared regularization strength, selected once by the tuning stage. It is
+# shared deliberately: ERM, the reference models and the downstream estimator
+# inside CORAL are the same model class, and giving them different strengths
+# would make part of any difference between them regularization rather than
+# transport.
+_LR_KWARGS = dict(max_iter=500, solver="lbfgs", C=_hp.get("erm"), random_state=0)
 _MLP_KWARGS = dict(
     hidden_layer_sizes=(32, 16),   # halved from (64,32); reduces ~3 400 → ~900 params
     activation="relu",

@@ -39,6 +39,7 @@ from sklearn.preprocessing import StandardScaler
 
 from generator.base_generator import DomainDataset
 from utils.metrics import auroc, auprc, ece, prevalence, f1, sensitivity, specificity
+from experiments import hparams
 
 # Everything below has to happen before the first TensorFlow import, which the
 # `adapt` import triggers: TF reads these once at initialisation and ignores them
@@ -142,6 +143,7 @@ def _importance_weights(
     X_src: np.ndarray,
     X_tgt: np.ndarray,
     X_eval: np.ndarray | None = None,
+    clip: tuple[float, float] | None = None,
 ) -> np.ndarray:
     """Domain-classifier importance weights w(x) = P(tgt|x)/P(src|x), clipped to [0.05, 20].
 
@@ -183,7 +185,8 @@ def _importance_weights(
     X_w = X_src if X_eval is None else X_eval
     p_tgt = clf.predict_proba(X_w)[:, 1]
     p_src = np.clip(1.0 - p_tgt, 1e-6, None)
-    w = np.clip(p_tgt / p_src, 0.05, 20.0)
+    lo, hi = hparams.get("iw_erm", clip)
+    w = np.clip(p_tgt / p_src, lo, hi)
     mean_w = float(w.mean())
     return w / mean_w if mean_w > 0 else w
 
@@ -206,7 +209,7 @@ def _weighted_auroc(y_true: np.ndarray, probs: np.ndarray, weights: np.ndarray) 
 def fit_coral(
     source_datasets: list[DomainDataset],
     target_dataset: DomainDataset,
-    lambda_: float = 1.0,
+    lambda_: float | None = None,
     seed: int = 0,
 ) -> dict:
     """
@@ -222,6 +225,7 @@ def fit_coral(
                      (target features are already in target-space; transform
                      would over-rotate them and degrade performance)
     """
+    lambda_ = hparams.get("coral", lambda_)
     X_all, y_all = _pool_sources(source_datasets)
     X_tr, X_val, y_tr, y_val = train_test_split(
         X_all, y_all, test_size=0.2, random_state=0, stratify=y_all,
@@ -683,7 +687,7 @@ def fit_iw_erm(
 def fit_irm(
     source_datasets: list[DomainDataset],
     target_dataset: DomainDataset,
-    lam: float = 1e2,
+    lam: float | None = None,
     n_iter: int = 500,
     seed: int = 0,
 ) -> dict:
@@ -723,6 +727,7 @@ def fit_irm(
     split the other methods take, so the seed-level pairing the sign-flip test
     assumes still holds.
     """
+    lam = hparams.get("irm", lam)
     from scipy.optimize import minimize
     from scipy.special import expit
     from sklearn.model_selection import train_test_split as _tts
