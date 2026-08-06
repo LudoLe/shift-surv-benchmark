@@ -23,14 +23,38 @@ NCORES="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 JOBS="${1:-$(( NCORES / 2 ))}"
 N_SEEDS="${2:-10}"
 (( JOBS < 1 )) && JOBS=1
-(( JOBS > 8 )) && JOBS=8
+# The cap was 8 because unpinned TensorFlow workers oversubscribed the
+# machine; with taskset below each worker occupies one core, so the limit is
+# now just how many cores you want to take.
+(( JOBS > NCORES )) && JOBS=$NCORES
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 mkdir -p outputs/logs outputs/tables
 
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
-       NUMEXPR_NUM_THREADS=1 TORCH_NUM_THREADS=1 PYTHONUNBUFFERED=1
+       NUMEXPR_NUM_THREADS=1 TORCH_NUM_THREADS=1 PYTHONUNBUFFERED=1 \
+       TF_NUM_INTRAOP_THREADS=1 TF_NUM_INTEROP_THREADS=1 TF_CPP_MIN_LOG_LEVEL=3
+
+# Pin each job to one CPU. TensorFlow does not read OMP_NUM_THREADS -- it has its
+# own pools, and they size themselves to the machine -- so on a 192-core server
+# each DANN/CDAN worker opened about 175 native threads. Sixty-four workers came
+# to 11181 threads over 192 hardware ones, load average 381 at 46% CPU: slower
+# than running serially. taskset makes the kernel enforce what the libraries
+# would not, and because the pools read sched_getaffinity they also stop creating
+# the threads in the first place: 451 threads instead of 11181, seven per worker.
+if command -v taskset >/dev/null 2>&1; then
+  PIN=1
+else
+  PIN=0
+  echo "  nota: taskset non disponibile; riduci JOBS per non sovrascrivere la macchina"
+fi
+NICE="${NICE:-10}"
+_pin_prefix() {   # $1 = job index
+  if [ "$PIN" = 1 ]; then printf 'taskset -c %d nice -n %d' "$(( $1 % NCORES ))" "$NICE"
+  else printf 'nice -n %d' "$NICE"; fi
+}
+
 
 ARCHIVE="outputs/_archive_synth_$(date +%F_%H%M)"
 mkdir -p "$ARCHIVE"
@@ -82,7 +106,7 @@ for entry in "${jobs_list[@]}"; do
   args="${entry#*|}"
   while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n 2>/dev/null || sleep 2; done
   echo "  [$(date +%T)] start  $prefix"
-  python -m experiments.run_adaptation $args \
+  $(_pin_prefix "${#pids[@]}") python -m experiments.run_adaptation $args \
       --n_seeds "$N_SEEDS" --out_prefix "$prefix" \
       > "outputs/logs/${prefix}.log" 2>&1 &
   pids+=("$!")

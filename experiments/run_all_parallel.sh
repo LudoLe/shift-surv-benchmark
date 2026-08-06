@@ -29,7 +29,9 @@ NCORES="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 JOBS="${2:-$(( NCORES / 2 ))}"
 N_SEEDS="${3:-10}"
 (( JOBS < 1 )) && JOBS=1
-(( JOBS > 10 )) && JOBS=10
+# Was capped at 10 because unpinned TensorFlow workers oversubscribed the
+# machine; taskset below makes each worker occupy one core.
+(( JOBS > NCORES )) && JOBS=$NCORES
 
 # Resolve the I3LUNG dir against the *caller's* cwd before cd'ing to the repo
 # root, so a relative path like "I3LUNG_DATA" works from wherever it was typed.
@@ -43,7 +45,28 @@ cd "$ROOT"
 mkdir -p outputs/logs outputs/tables
 
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
-       NUMEXPR_NUM_THREADS=1 TORCH_NUM_THREADS=1 PYTHONUNBUFFERED=1
+       NUMEXPR_NUM_THREADS=1 TORCH_NUM_THREADS=1 PYTHONUNBUFFERED=1 \
+       TF_NUM_INTRAOP_THREADS=1 TF_NUM_INTEROP_THREADS=1 TF_CPP_MIN_LOG_LEVEL=3
+
+# Pin each job to one CPU. TensorFlow does not read OMP_NUM_THREADS -- it has its
+# own pools, and they size themselves to the machine -- so on a 192-core server
+# each DANN/CDAN worker opened about 175 native threads. Sixty-four workers came
+# to 11181 threads over 192 hardware ones, load average 381 at 46% CPU: slower
+# than running serially. taskset makes the kernel enforce what the libraries
+# would not, and because the pools read sched_getaffinity they also stop creating
+# the threads in the first place: 451 threads instead of 11181, seven per worker.
+if command -v taskset >/dev/null 2>&1; then
+  PIN=1
+else
+  PIN=0
+  echo "  nota: taskset non disponibile; riduci JOBS per non sovrascrivere la macchina"
+fi
+NICE="${NICE:-10}"
+_pin_prefix() {   # $1 = job index
+  if [ "$PIN" = 1 ]; then printf 'taskset -c %d nice -n %d' "$(( $1 % NCORES ))" "$NICE"
+  else printf 'nice -n %d' "$NICE"; fi
+}
+
 
 # --- job list: "prefix|args..." -------------------------------------------
 jobs_list=()
@@ -80,7 +103,7 @@ pids=()
 pref=()
 run_one() {
   local prefix="$1"; shift
-  python -m experiments.run_real_data "$@" \
+  $(_pin_prefix "${JOB_IDX:-0}") python -m experiments.run_real_data "$@" \
       --n_seeds "$N_SEEDS" --out_prefix "$prefix" \
       > "outputs/logs/${prefix}.log" 2>&1
 }
@@ -91,7 +114,7 @@ for entry in "${jobs_list[@]}"; do
   # Block until a slot frees up.
   while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n 2>/dev/null || sleep 2; done
   echo "  [$(date +%T)] start  $prefix"
-  run_one "$prefix" $args &
+  JOB_IDX=${#pids[@]} run_one "$prefix" $args &
   pids+=("$!")
   pref+=("$prefix")
 done
