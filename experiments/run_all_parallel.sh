@@ -83,7 +83,22 @@ if [[ -n "$I3DIR" ]]; then
     echo "ERROR: $I3DIR/cb.csv not found — is the I3LUNG path correct?" >&2
     exit 1
   fi
-  for t in "GHD INT" "INT GHD" "INT MH" "INT SZMC" "INT UOC" "INT VHIO" "VHIO INT"; do
+  # All 30 ordered pairs, not a chosen seven. The previous list had INT as the
+  # source in five of its seven entries, which meant the pooled effect was
+  # largely one center's model carried to the others, and it left the paper
+  # having to justify the selection. It also disagreed with the survival check of
+  # Section V-D, which already refits all thirty ordered pairs; running the same
+  # thirty here makes the two analyses answer the same question.
+  #
+  # Centers are those surviving the min_n=50 filter in load_i3lung_all.
+  I3_CENTERS=(GHD INT VHIO UOC MH SZMC)
+  for s_c in "${I3_CENTERS[@]}"; do
+    for d_c in "${I3_CENTERS[@]}"; do
+      [ "$s_c" = "$d_c" ] && continue
+      jobs_list+=("i3lung_${s_c}_${d_c}|--data_dir $I3DIR --source $s_c --target $d_c")
+    done
+  done
+  for t in; do
     s="${t% *}"; d="${t#* }"
     jobs_list+=("i3lung_${s}_${d}|--data_dir $I3DIR --source $s --target $d")
   done

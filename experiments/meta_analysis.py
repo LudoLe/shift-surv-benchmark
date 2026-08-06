@@ -200,6 +200,44 @@ def _fmt(r: dict) -> str:
             f"p={r['p']:.3f}   I2={r['I2']:4.0f}%  tau2={r['tau2']:.5f}")
 
 
+def _target_of(name: str) -> str:
+    """The target center of a transfer name like ``INT_GHD`` or ``loco_GHD``."""
+    return name.split("_")[-1]
+
+
+def _collapse_by_target(data_metric: dict, transfers: list[str]) -> tuple[dict, list[str]]:
+    """Average each method's effect over the transfers sharing a target center.
+
+    With all thirty ordered pairs from six centers, every cohort is the target
+    five times, so thirty units are nowhere near thirty independent pieces of
+    evidence and DerSimonian-Laird would return intervals far too tight. The six
+    target cohorts are disjoint patient sets, so collapsing to one value per
+    target restores the assumption at the level where it matters. The within-
+    target standard errors are combined as if the five estimates were exchangeable
+    replicates of the same quantity, which understates their correlation and is
+    therefore conservative for the pooled interval.
+
+    Source centers still overlap across targets -- center A is a source for both
+    B and C -- so the six units are not fully independent either. That residual
+    dependence is between fitted models rather than between measured outcomes,
+    and is the smaller of the two.
+    """
+    out: dict = {}
+    for m, per in data_metric.items():
+        by_t: dict[str, list] = {}
+        for t, (g, se) in per.items():
+            by_t.setdefault(_target_of(t), []).append((g, se))
+        coll = {}
+        for tgt, vals in by_t.items():
+            gs = np.array([v[0] for v in vals], dtype=float)
+            ses = np.array([v[1] for v in vals], dtype=float)
+            coll[tgt] = (float(gs.mean()),
+                         float(np.sqrt(np.sum(ses ** 2)) / len(ses)))
+        out[m] = coll
+    targets = sorted({_target_of(t) for t in transfers})
+    return out, targets
+
+
 def _design_of(name: str) -> str:
     """Which experimental design a transfer belongs to.
 
@@ -211,8 +249,16 @@ def _design_of(name: str) -> str:
 
 
 def run(prefix: str, clinical_margin: float, out_prefix: str | None,
-        exclude: list[str] | None = None) -> None:
+        exclude: list[str] | None = None, by_target: bool = False) -> None:
     transfers, data = load_transfers(prefix, exclude=exclude)
+    if by_target:
+        for metric in ("auroc", "ece"):
+            data[metric], transfers_t = _collapse_by_target(data[metric], transfers)
+        transfers = transfers_t
+        print(f"\n  COLLASSATO PER CENTRO TARGET: {len(transfers)} unita' "
+              f"({', '.join(transfers)})")
+        print("  Le coorti target sono disgiunte, quindi queste unita' soddisfano")
+        print("  l'assunzione di indipendenza al livello dove conta.")
     designs: dict[str, list[str]] = {}
     for t in transfers:
         designs.setdefault(_design_of(t), []).append(t)
@@ -282,10 +328,14 @@ if __name__ == "__main__":
                     help="AUROC/ECE gain considered clinically meaningful (default: 0.02).")
     ap.add_argument("--out_prefix", default=None,
                     help="If set, write <out_prefix>_meta.csv (default: <prefix>).")
+    ap.add_argument("--by_target", action="store_true",
+                    help="collassa i transfer che condividono il centro target "
+                         "in un'unita' sola prima di poolare (raccomandato con "
+                         "tutte e 30 le coppie ordinate)")
     ap.add_argument("--exclude", nargs="*", default=None, metavar="SUBSTR",
                     help="Drop bootstrap files whose name contains any of these "
                          "substrings, e.g. --exclude loco to keep the "
                          "center-to-center design separate from the LOCO folds.")
     args = ap.parse_args()
     run(args.prefix, args.clinical_margin, args.out_prefix or args.prefix,
-        exclude=args.exclude)
+        exclude=args.exclude, by_target=args.by_target)
