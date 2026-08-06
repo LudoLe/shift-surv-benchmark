@@ -128,9 +128,12 @@ def _score_iw_erm(clip, src, tgt, seed):
     from experiments.adaptation_methods import _importance_weights
 
     def fp(X_tr, y_tr, X_val, X_tgt):
-        w = _importance_weights(X_tr, X_tgt, X_eval=X_tr)
-        w = np.clip(w, clip[0], clip[1])
-        w = w / w.mean()
+        # The candidate clip is passed through, not applied on top: without the
+        # override _importance_weights reads the frozen file, and clipping twice
+        # keeps whichever bound is tighter, so the widest candidate can never be
+        # evaluated. The scoring weights inside _iwcv_score deliberately keep the
+        # frozen clip -- the criterion must not move with the candidate.
+        w = _importance_weights(X_tr, X_tgt, X_eval=X_tr, clip=tuple(clip))
         m = LogisticRegression(max_iter=500, solver="lbfgs", C=1.0, random_state=0)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -196,6 +199,11 @@ _SCORERS = {
 # ---------------------------------------------------------------------------
 
 def run(methods: list[str] | None = None, verbose: bool = True) -> dict:
+    if _OUT.exists():
+        print(f"  nota: {_OUT.name} esiste gia'. I valori dentro entrano nel\n"
+              f"        criterio di selezione (pesi IWCV, forza di regolarizzazione\n"
+              f"        condivisa), quindi il tuning non e' idempotente. Rimuovilo\n"
+              f"        per ripartire dai default pre-tuning.\n")
     space = yaml.safe_load(_SPACE.read_text())
     meta, grids = space["meta"], space["grids"]
     seeds, regimes = meta["tuning_seeds"], meta["tuning_regimes"]

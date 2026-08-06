@@ -30,14 +30,14 @@ selected:
   iw_erm:
     parameter: clip
     value:
-    - 0.05
-    - 20.0
-    criterion_mean: 0.7207
+    - 0.1
+    - 10.0
+    criterion_mean: 0.7205
     grid_scores:
       '[0.1, 10.0]': 0.7205
-      '[0.05, 20.0]': 0.7207
-      '[0.02, 50.0]': 0.72
-    spread: 0.0008
+      '[0.05, 20.0]': 0.72
+      '[0.02, 50.0]': 0.7195
+    spread: 0.001
   coral:
     parameter: shrinkage
     value: 0.3
