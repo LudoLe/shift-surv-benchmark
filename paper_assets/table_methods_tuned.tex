@@ -1,0 +1,101 @@
+% =====================================================================
+% Sostituisce Tab. \ref{tab:methods}.
+%
+% Cosa cambia rispetto alla versione precedente, e perche':
+%
+%   CORAL      diceva "No free parameter; fixed transform". Falso: lo
+%              shrinkage esiste ed e' stato selezionato (0.3).
+%   IRM        diceva lambda = 100. Il valore selezionato e' 1.0.
+%   IW-ERM     diceva clip [0.05, 20] "no search". Il clip selezionato
+%              e' [0.1, 10]; la ricerca c'e' stata.
+%   ERM        diceva "None beyond the shared l2 strength". C e' stato
+%              selezionato come gli altri, perche' tunare i metodi e non
+%              la baseline avrebbe reso il confronto generoso verso
+%              l'adattamento.
+%   GroupDRO   diceva "Fixed settings".
+%
+% Valori da configs/hyperparameters_selected.yaml, tuning del 2026-08-06.
+% =====================================================================
+
+\begin{table*}[t]
+\caption{Methods compared. ``Uses'' states what each method observes during
+training; no practical method uses target labels, which enter only for
+evaluation and for the analytic reference models. ``Acts on'' describes the
+object the method modifies. ``Primary target'' denotes the property it is
+designed to improve; representation- and reweighting-based methods may also
+affect calibration as a side effect. Prior adjustment and Platt scaling are
+implemented as monotone increasing probability transformations and therefore
+leave AUROC unchanged. Hyperparameters were selected once, on a seed block
+disjoint from every seed used for evaluation, by a criterion that never
+observes target labels: importance-weighted cross-validation on the source
+validation split for methods that see unlabeled target covariates, and
+leave-one-source-out validation for those that do not. One value is frozen per
+method rather than one per regime, since a deployable protocol cannot retune
+for a shift it has not identified. Across the entire grid the selection
+criterion moves by at most $0.004$ AUROC for any method (least for CORAL,
+$0.0001$; most for IRM, $0.0038$), so the comparison does not rest on the
+values chosen. On the real cohorts the same frozen values are used, except that
+DANN and CDAN re-run their IWCV search per transfer --- an asymmetry that
+favours the adversarial methods, which nonetheless do not exceed ERM.}
+\label{tab:methods}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}p{0.12\linewidth}p{0.20\linewidth}p{0.23\linewidth}p{0.16\linewidth}p{0.21\linewidth}@{}}
+\toprule
+\textbf{Method} & \textbf{Uses} & \textbf{Acts on} &
+\textbf{Primary target} & \textbf{Hyperparameters} \\
+\midrule
+
+ERM & Source labels &
+--- (baseline) & --- &
+$C = 1$, from $\{1, 10, 10^2, 10^3, 10^4\}$ \\
+
+IW-ERM~\cite{shimodaira2000improving} & Source labels, unlabeled target $x$ &
+Reweights the source risk by an estimated density ratio &
+Discrim.; calibration may change &
+Density ratio clipped to $[0.1, 10]$, from three widths; weights normalized to
+unit mean \\
+
+CORAL~\cite{sun2016deep} & Source labels, unlabeled target $x$ &
+Second-order feature statistics, whitened then recolored &
+Discrim.; calibration may change &
+Shrinkage $0.3$, from $\{0.1, 0.3, 1, 3, 10\}$ \\
+
+DANN~\cite{ganin2016domain} & Source labels, unlabeled target $x$ &
+Learned representation, adversarially against a domain discriminator &
+Discrim.; calibration may change &
+Adversarial weight and encoder width by IWCV~\cite{sugiyama2007covariate},
+re-run per transfer \\
+
+CDAN~\cite{long2018conditional} & Source labels, unlabeled target $x$ &
+As DANN, with the discriminator conditioned on the task prediction &
+Discrim.; calibration may change &
+As DANN \\
+
+IRM~\cite{arjovsky2019invariant} &
+Labels from $\geq 2$ source centers (DG only) &
+Penalizes predictors whose optimum differs across source centers &
+Discrim.; calibration may change &
+$\lambda = 1$, from $\{1, 10, 10^2, 10^3\}$ \\
+
+GroupDRO~\cite{sagawa2020distributionally} &
+Labels from $\geq 2$ source centers (DG only) &
+Minimizes the worst source-center risk rather than the average &
+Discrim.; calibration may change &
+Group step size $0.01$, from $\{0.01, 0.1, 1\}$; source-only early stopping \\
+
+Prior adj.~\cite{saerens2002adjusting} & Source model, unlabeled target $x$ &
+Probability scale only, by EM on the target prior &
+Calibr. only &
+None beyond EM convergence \\
+
+Platt~\cite{platt1999probabilistic} & Source model, source validation labels &
+Probability scale only, by a monotone increasing logistic map &
+Calibr. only &
+None beyond the source-validation fit \\
+
+\bottomrule
+\end{tabular}
+\end{table*}
