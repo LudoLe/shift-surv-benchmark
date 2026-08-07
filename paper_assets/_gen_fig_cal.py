@@ -178,11 +178,16 @@ def draw_panel(ax, panel_key: str) -> None:
             yb = (np.nanmax(tops) if tops else 0.0) + 0.012
             ax.plot([x0, x0, x1, x1], [yb - 0.006, yb, yb, yb - 0.006],
                     color="#555555", lw=0.9, zorder=7, solid_capstyle="butt")
-            label = star_of(stars, key)
-            if note:
-                label = f"{label} ({note})"
-            ax.text(0.5 * (x0 + x1), yb + 0.003, label,
+            # The winning method's name is NOT drawn: it clutters the panel and
+            # was asked to come off. It still has to be stated, because when the
+            # winner has no bar the bracket spans the group and a reader will
+            # otherwise read the star as belonging to the lowest bar, which is a
+            # different method. It goes in the caption instead -- the generator
+            # prints the line to paste.
+            ax.text(0.5 * (x0 + x1), yb + 0.003, star_of(stars, key),
                     ha="center", va="bottom", fontsize=8.5, color="#333333")
+            if note:
+                _caption_notes.append((key, winner, star_of(stars, key)))
 
     ax.set_xticks(x)
     ax.set_xticklabels([lbl for _k, lbl in scen], rotation=30, ha="right")
@@ -213,6 +218,30 @@ def draw_panel(ax, panel_key: str) -> None:
        borderaxespad=0.3)
 
 
+
+# Regimes whose starred method has no bar of its own, collected while drawing so
+# the caption can name it. The name is deliberately not on the panel.
+_caption_notes: list = []
+
+
+def _print_caption_notes(what: str) -> None:
+    if not _caption_notes:
+        return
+    LABEL = {"covariate_shift": "covariate", "observational_shift": "measurement",
+             "spurious_shift": "spurious", "baseline_hazard_shift": "baseline-hazard",
+             "prior_shift": "label-prior", "concept_shift": "concept"}
+    PRETTY = {"dann": "DANN", "cdan": "CDAN", "coral": "CORAL", "iw_erm": "IW-ERM",
+              "irm": "IRM", "group_dro": "GroupDRO",
+              "prior_recalib": "prior adjustment", "platt_scaling": "Platt scaling",
+              "isotonic": "isotonic"}
+    parts = [f"{PRETTY.get(m, m)} under {LABEL.get(k, k)} shift ({s})"
+             for k, m, s in _caption_notes]
+    print(f"\n  RIGA DA AGGIUNGERE ALLA DIDASCALIA di {what}:")
+    print("    Stars mark the max-statistic test over the full comparison set; "
+          "the method attaining it is " + "; ".join(parts) +
+          ", which is not drawn as a separate bar.")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--outdir", default=OUTDIR)
@@ -227,6 +256,7 @@ def main() -> None:
                         bbox_inches="tight")
         plt.close(fig)
         print(f"  scritto {args.outdir}/fig_cal_{panel}.{{pdf,png}}")
+    _print_caption_notes("fig:cal")
 
 
 if __name__ == "__main__":

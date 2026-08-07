@@ -258,12 +258,12 @@ def draw_panel(ax, panel_key: str) -> None:
             # bracket would silently credit the drawn bar with another method's
             # p-value -- the error fig_cal was fixed for. Naming the winner when
             # it differs keeps the annotation attributable.
-            label = star_of(stars, key)
+            # Name off the panel, into the caption: see _gen_fig_cal.py.
             tested = tested_best(stars, key)
             if tested and tested != best:
-                label = f"{label} ({tested.replace('_', '-')})"
-            ax.text(0.5 * (x0 + x1), yb + 0.004, label, ha="center", va="bottom",
-                    fontsize=8.5, color="#333333")
+                _caption_notes.append((key, tested, star_of(stars, key)))
+            ax.text(0.5 * (x0 + x1), yb + 0.004, star_of(stars, key),
+                    ha="center", va="bottom", fontsize=8.5, color="#333333")
 
     ax.set_xticks(x)
     ax.set_xticklabels([lbl for _k, lbl in scen], rotation=30, ha="right")
@@ -289,6 +289,30 @@ def draw_panel(ax, panel_key: str) -> None:
        borderaxespad=0.3)
 
 
+
+# Regimes whose starred method has no bar of its own, collected while drawing so
+# the caption can name it. The name is deliberately not on the panel.
+_caption_notes: list = []
+
+
+def _print_caption_notes(what: str) -> None:
+    if not _caption_notes:
+        return
+    LABEL = {"covariate_shift": "covariate", "observational_shift": "measurement",
+             "spurious_shift": "spurious", "baseline_hazard_shift": "baseline-hazard",
+             "prior_shift": "label-prior", "concept_shift": "concept"}
+    PRETTY = {"dann": "DANN", "cdan": "CDAN", "coral": "CORAL", "iw_erm": "IW-ERM",
+              "irm": "IRM", "group_dro": "GroupDRO",
+              "prior_recalib": "prior adjustment", "platt_scaling": "Platt scaling",
+              "isotonic": "isotonic"}
+    parts = [f"{PRETTY.get(m, m)} under {LABEL.get(k, k)} shift ({s})"
+             for k, m, s in _caption_notes]
+    print(f"\n  RIGA DA AGGIUNGERE ALLA DIDASCALIA di {what}:")
+    print("    Stars mark the max-statistic test over the full comparison set; "
+          "the method attaining it is " + "; ".join(parts) +
+          ", which is not drawn as a separate bar.")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--outdir", default=OUTDIR)
@@ -304,6 +328,7 @@ def main() -> None:
             fig.savefig(out, bbox_inches="tight")
         plt.close(fig)
         print(f"  scritto {args.outdir}/fig_disc_{panel}.{{pdf,png}}")
+    _print_caption_notes("fig:disc")
 
 
 if __name__ == "__main__":
