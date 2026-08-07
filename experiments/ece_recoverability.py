@@ -118,8 +118,16 @@ def compute_ece_recoverability(sources, tgt, n_bins=10, seed=0) -> dict:
     ece_erm = ece(yB, pB, n_bins=n_bins)
 
     # Deployable, unsupervised: Platt on source val (affine, source-estimated).
-    platt = LogisticRegression(C=1e6, solver="lbfgs", max_iter=1000).fit(p_val.reshape(-1, 1), yval)
-    ece_platt = ece(yB, platt.predict_proba(pB.reshape(-1, 1))[:, 1], n_bins=n_bins)
+    # Through utils.calibration.fit_platt, not a bare LogisticRegression: an
+    # unregularized fit on a small validation split is not guaranteed to be
+    # increasing, and a decreasing one reverses the ranking instead of
+    # recalibrating it. fit_platt rejects such a fit and falls back to the
+    # uncalibrated probabilities. This module used its own unguarded copy, so
+    # the paper's claim that Platt scaling cannot change AUROC held on one code
+    # path and not on this one.
+    from utils.calibration import fit_platt
+    _, p_platt_B, _, _ = fit_platt(p_val, yval, pB)
+    ece_platt = ece(yB, p_platt_B, n_bins=n_bins)
 
     # Deployable, unsupervised: Prior-EM (target prior from *unlabeled* full target).
     p_prior_all = _saerens_em(p_tgt_all, float(ytr.mean()))
