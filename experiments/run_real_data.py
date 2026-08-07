@@ -657,11 +657,18 @@ def _aligned_prob_matrices(prob_accum: dict, verbose: bool = True) -> dict:
             print("  ATTENZIONE: nessun seed comune a tutti i metodi, "
                   "bootstrap saltato")
         return {}
-    dropped = {m: sorted(set(d) - common) for m, d in have.items() if set(d) - common}
-    if dropped and verbose:
-        for m, ss in dropped.items():
-            print(f"  ATTENZIONE: {m} manca sui seed {ss}; il bootstrap usa i "
-                  f"{len(common)} seed comuni a tutti i metodi")
+    # Name the methods that are MISSING seeds, not the ones being truncated to
+    # match them. Reporting "erm manca sui seed [1]" when it was DANN that failed
+    # reads backwards and never names the method that actually broke, which is
+    # the only thing this line is for.
+    union = set().union(*(set(d) for d in have.values()))
+    culprits = {m: sorted(union - set(d)) for m, d in have.items() if union - set(d)}
+    if culprits and verbose:
+        for m, ss in sorted(culprits.items()):
+            print(f"  ATTENZIONE: {m} non ha prodotto i seed {ss}")
+        print(f"  -> il bootstrap usa i {len(common)} seed comuni a tutti i "
+              f"metodi; le medie in _summary.csv restano su tutti i seed "
+              f"disponibili per metodo e possono quindi differire")
     order = sorted(common)
     return {m: np.vstack([d[s] for s in order]) for m, d in have.items()}
 
@@ -845,8 +852,16 @@ def _bootstrap_real_gaps_per_seed(
         dau_w, dau_b = _decomp(d_au[m])
         rows.append({
             "method":            m,
-            # Point estimates: across-seed mean of the observed metric, so these
-            # match tgt_auroc_mean / tgt_ece_mean in the seed summary table.
+            # Point estimates: across-seed mean of the observed metric. These
+            # match tgt_auroc_mean / tgt_ece_mean in the seed summary table
+            # whenever every method produced every seed, which is the normal
+            # case. When a fit fails, _aligned_prob_matrices restricts the
+            # bootstrap to the seeds common to all methods so the comparison
+            # stays paired, while _aggregate_real keeps each method's own
+            # available seeds -- more data for the marginal summary, but the two
+            # tables then differ for every method, not only the one that failed.
+            # The drop is printed at run time; check the log before quoting the
+            # two side by side.
             "auroc":             round(float(np.nanmean(obs_au[m])), 4),
             "auroc_lo":          round(au_lo, 4),
             "auroc_hi":          round(au_hi, 4),

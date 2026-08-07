@@ -577,7 +577,19 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
                 "skip_reason": skip_reason}
 
     means = {m: float(np.nanmean(A[m])) for m in family}
-    best = max(means, key=means.get)
+    # max() keeps its first element and replaces it only when f(x) > f(best);
+    # every comparison against NaN is False, so a family whose first member
+    # scored NaN returned that member as the "best". The gain and headroom were
+    # then NaN too, and _verdict fell through all four of its tests -- each also
+    # False on NaN -- onto its final "supported". A configuration where
+    # adaptation produced no usable number was being counted as evidence FOR the
+    # paper's claim, which is the one direction an error here must never take.
+    finite = {m: v for m, v in means.items() if np.isfinite(v)}
+    if not finite:
+        return {"regime": regime, "verdict": "degenerate", **_flat(cfgv),
+                "n_seeds": len(A["erm"]), "n_seeds_skipped": n_skipped,
+                "skip_reason": skip_reason or "nessun metodo ha prodotto un AUROC finito"}
+    best = max(finite, key=finite.get)
     gain, headroom = A[best] - A["erm"], A["obs_oracle"] - A["erm"]
 
     def _mci(v):
@@ -622,7 +634,14 @@ def _verdict(gain: float, gain_ci: float, headroom: float) -> str:
     ``uninformative`` keys on a pre-specified threshold on the headroom point
     estimate rather than on a test, so the classification does not depend on how
     precisely the headroom happened to be measured in that configuration.
+
+    A non-finite gain or headroom is ``degenerate``, never one of the five. Each
+    of the comparisons below is False on NaN, so without this guard such a
+    configuration reached the final ``supported`` -- counting a cell that
+    measured nothing as evidence for the claim under test.
     """
+    if not (np.isfinite(gain) and np.isfinite(gain_ci) and np.isfinite(headroom)):
+        return "degenerate"
     lo, hi = gain - gain_ci, gain + gain_ci
     if headroom < HEADROOM_MIN:
         return "uninformative"

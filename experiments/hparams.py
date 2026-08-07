@@ -57,7 +57,7 @@ def get(method: str, override=None):
     if override is not None:
         return override
     entry = _load().get(method)
-    if entry is None or "value" in entry is False:
+    if entry is None or "value" not in entry:
         return _FALLBACK[method]
     v = entry.get("value", _FALLBACK[method])
     return tuple(v) if isinstance(v, list) else v

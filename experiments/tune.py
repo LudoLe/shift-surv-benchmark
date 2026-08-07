@@ -237,7 +237,17 @@ def run(methods: list[str] | None = None, verbose: bool = True) -> dict:
             table[str(c)] = float(np.mean(vals)) if vals else float("nan")
             if verbose:
                 print(f"    {str(c):<14} {table[str(c)]:.4f}")
-        best = max(table, key=lambda k: table[k])
+        # nanargmax, not max(): every comparison against NaN is False, so max()
+        # would keep its first element when that candidate scored NaN and report
+        # a value the criterion never preferred. experiments/select.py already
+        # does this and its comment claims to follow tune.py -- now it does.
+        import math
+        _keys = list(table)
+        _vals = [table[k] for k in _keys]
+        if not any(math.isfinite(v) for v in _vals):
+            raise SystemExit(f"{name}: nessun candidato ha prodotto un criterio "
+                             f"finito; controlla la configurazione di tuning")
+        best = _keys[int(np.nanargmax(_vals))]
         best_val = next(c for c in cands if str(c) == best)
         selected[name] = {"parameter": key, "value": best_val,
                           "criterion_mean": round(table[best], 4),
