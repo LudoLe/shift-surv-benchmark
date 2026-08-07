@@ -509,6 +509,16 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
             src, tgt = data["source"], data["target"]
             if len(np.unique(tgt.y)) < 2:
                 continue
+            # The source must also be non-degenerate. At extreme lambda0 the
+            # pooled source can come out single-class, and every fit_* helper
+            # then returns {"feature_set", "error"} with no "target" key, so the
+            # seed used to raise KeyError and kill the whole shard. Stratified
+            # splitting additionally needs two members of each class. A seed
+            # failing either test carries no information about adaptation, which
+            # is exactly what the target guard above already assumes.
+            _ys = np.concatenate([np.asarray(d.y) for d in src]).astype(int)
+            if len(np.unique(_ys)) < 2 or np.bincount(_ys).min() < 2:
+                continue
             _y = np.asarray(tgt.y)
             minority.append(float(min(_y.mean(), 1.0 - _y.mean())))
             acc["erm"].append(fit_all_observed(src, tgt)["target"]["auroc"])
@@ -739,9 +749,20 @@ def worlds(regimes, seeds, n, n_src, with_nets, n_worlds, seed0,
             # the requested subset, for the same reason.
             c["amplitude"] = _from_unit(AMPLITUDE[r]["draw"],
                                         u[len(scalar) + REGIMES.index(r)])
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                row = _evaluate(r, c, seeds, n, n_src, with_nets)
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    row = _evaluate(r, c, seeds, n, n_src, with_nets)
+            except Exception as exc:
+                # One pathological world must not cost the other ninety-nine.
+                # worlds() only returns its rows at the end, so an exception used
+                # to discard every world already computed in the shard. The row is
+                # kept with an explicit verdict so a failure stays visible in the
+                # output instead of silently shrinking the design.
+                print(f"      mondo {wi+1} / {r}: {type(exc).__name__}: {exc}",
+                      flush=True)
+                row = {"regime": r, "verdict": "error",
+                       "error": f"{type(exc).__name__}: {exc}", **_flat(c)}
             row.update(mode="worlds", world=wi, axis="", value="", is_default=False)
             rows.append(row)
         done = [x for x in rows if x.get("world") == wi and "adapt_gain" in x]
@@ -775,7 +796,7 @@ def confirm(csv_paths, seeds, n, n_src, with_nets, n_confirm) -> list[dict]:
     for path in csv_paths:
         with open(path) as fh:
             for r in _csv.DictReader(fh):
-                if r.get("verdict") in ("uninformative", "degenerate"):
+                if r.get("verdict") in ("uninformative", "degenerate", "error"):
                     continue
                 try:
                     r["_gain"] = float(r["adapt_gain"])
@@ -831,9 +852,13 @@ def confirm(csv_paths, seeds, n, n_src, with_nets, n_confirm) -> list[dict]:
 
 
 def report(rows: list[dict]) -> None:
-    good = [r for r in rows if r["verdict"] != "degenerate"]
+    n_err = sum(r.get("verdict") == "error" for r in rows)
+    good = [r for r in rows if r["verdict"] not in ("degenerate", "error")]
     STATES = ("supported", "inconclusive", "candidate_break", "BREAK", "uninformative")
     n = {k: sum(r["verdict"] == k for r in good) for k in STATES}
+    if n_err:
+        print(f"\n  ATTENZIONE: {n_err} configurazioni terminate con errore ed "
+              f"escluse dai conteggi. Cercale con verdict=error nel CSV.")
     print(f"\n{'='*96}\n  ESITO SU {len(good)} CONFIGURAZIONI VALUTATE"
           f"  ({len(rows)-len(good)} degeneri, scartate)\n{'='*96}")
     print("  " + "   ".join(f"{k} {n[k]}" for k in STATES))
