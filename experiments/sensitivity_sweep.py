@@ -495,6 +495,11 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
     # calibrated to a prevalence, so the realised minority fraction is the only
     # honest description of what the configuration actually was.
     minority: list[float] = []
+    # Seeds dropped by the guards or by a failing fit. Reported per row so a
+    # configuration whose verdict rests on three seeds instead of ten is visible
+    # in the output rather than hidden behind n_seeds.
+    n_skipped = 0
+    skip_reason = ""
 
     prev_env = os.environ.get("SHIFT_SURV_CONFIG")
     try:
@@ -508,6 +513,8 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
                 base=BaseParams(seed=s, **base_kw), **scen_kw)
             src, tgt = data["source"], data["target"]
             if len(np.unique(tgt.y)) < 2:
+                n_skipped += 1
+                skip_reason = skip_reason or "target single-class"
                 continue
             # The source must also be non-degenerate. At extreme lambda0 the
             # pooled source can come out single-class, and every fit_* helper
@@ -518,24 +525,45 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
             # is exactly what the target guard above already assumes.
             _ys = np.concatenate([np.asarray(d.y) for d in src]).astype(int)
             if len(np.unique(_ys)) < 2 or np.bincount(_ys).min() < 2:
+                n_skipped += 1
+                skip_reason = skip_reason or "source single-class or <2 in a class"
                 continue
+            # The seed is committed only if every fit succeeds. The two guards
+            # above catch the source and target being single-class, but at a few
+            # events per domain other fits are fragile in their own way -- an
+            # internal split, a cross-validation fold -- and chasing each one
+            # with its own invented threshold would be guessing. A seed on which
+            # some fit is numerically impossible carries no information about
+            # adaptation, which is what the guards already assume. Accumulating
+            # into a per-seed dict first matters: appending directly would leave
+            # the method lists at different lengths when a fit halfway down the
+            # list raises, and every mean after that would compare different
+            # subsets of seeds.
             _y = np.asarray(tgt.y)
+            try:
+                vals = {
+                    "erm":  fit_all_observed(src, tgt)["target"]["auroc"],
+                    "latent_oracle": fit_invariant_oracle(src, tgt)["target"]["auroc"],
+                    "obs_oracle": fit_observed_target_oracle(src, tgt, seed=s)["target"]["auroc"],
+                    "coral": fit_coral(src, tgt, seed=s)["target"]["auroc"],
+                    "iw_erm": fit_iw_erm(src, tgt, seed=s)["target"]["auroc"],
+                }
+                if n_src >= 2:
+                    from experiments.adaptation_methods import fit_irm
+                    from experiments.group_dro import fit_group_dro
+                    vals["irm"] = fit_irm(src, tgt, seed=s)["target"]["auroc"]
+                    vals["group_dro"] = fit_group_dro(src, tgt, seed=s)["target"]["auroc"]
+                if with_nets:
+                    from experiments.adaptation_methods import fit_dann, fit_cdan
+                    vals["dann"] = fit_dann(src, tgt, seed=s, use_iwcv=False)["target"]["auroc"]
+                    vals["cdan"] = fit_cdan(src, tgt, seed=s, use_iwcv=False)["target"]["auroc"]
+            except (ValueError, KeyError, np.linalg.LinAlgError) as exc:
+                n_skipped += 1
+                skip_reason = f"{type(exc).__name__}: {exc}"
+                continue
             minority.append(float(min(_y.mean(), 1.0 - _y.mean())))
-            acc["erm"].append(fit_all_observed(src, tgt)["target"]["auroc"])
-            acc["latent_oracle"].append(fit_invariant_oracle(src, tgt)["target"]["auroc"])
-            acc["obs_oracle"].append(
-                fit_observed_target_oracle(src, tgt, seed=s)["target"]["auroc"])
-            acc["coral"].append(fit_coral(src, tgt, seed=s)["target"]["auroc"])
-            acc["iw_erm"].append(fit_iw_erm(src, tgt, seed=s)["target"]["auroc"])
-            if n_src >= 2:
-                from experiments.adaptation_methods import fit_irm
-                from experiments.group_dro import fit_group_dro
-                acc["irm"].append(fit_irm(src, tgt, seed=s)["target"]["auroc"])
-                acc["group_dro"].append(fit_group_dro(src, tgt, seed=s)["target"]["auroc"])
-            if with_nets:
-                from experiments.adaptation_methods import fit_dann, fit_cdan
-                acc["dann"].append(fit_dann(src, tgt, seed=s, use_iwcv=False)["target"]["auroc"])
-                acc["cdan"].append(fit_cdan(src, tgt, seed=s, use_iwcv=False)["target"]["auroc"])
+            for _k, _v in vals.items():
+                acc[_k].append(_v)
     finally:
         if prev_env is None:
             os.environ.pop("SHIFT_SURV_CONFIG", None)
@@ -544,7 +572,9 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
 
     A = {k: np.asarray(v, dtype=float) for k, v in acc.items()}
     if len(A["erm"]) < 2:
-        return {"regime": regime, "verdict": "degenerate", **_flat(cfgv)}
+        return {"regime": regime, "verdict": "degenerate", **_flat(cfgv),
+                "n_seeds": len(A["erm"]), "n_seeds_skipped": n_skipped,
+                "skip_reason": skip_reason}
 
     means = {m: float(np.nanmean(A[m])) for m in family}
     best = max(means, key=means.get)
@@ -563,7 +593,8 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
     h_m, h_ci = _mci(headroom)
     return {
         "regime": regime, **_flat(cfgv),
-        "n_seeds": len(A["erm"]), "family": "+".join(family),
+        "n_seeds": len(A["erm"]), "n_seeds_skipped": n_skipped,
+        "skip_reason": skip_reason, "family": "+".join(family),
         "erm_auroc": round(float(np.nanmean(A["erm"])), 4),
         "latent_oracle_auroc": round(float(np.nanmean(A["latent_oracle"])), 4),
         "obs_oracle_auroc": round(float(np.nanmean(A["obs_oracle"])), 4),

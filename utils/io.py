@@ -25,11 +25,28 @@ def tables_dir(scenario: str) -> Path:
 
 
 def save_table_csv(rows: list[dict], path: Path) -> None:
+    """Write rows to CSV, taking the columns from the union of all their keys.
+
+    Taking them from rows[0] alone loses a whole table when a later row carries
+    an extra key: DictWriter tolerates missing keys (they come out blank) but
+    raises on extra ones, and it raises inside writerows, after part of the file
+    is already on disk. That is how a sweep shard ended up with eleven of its
+    thirteen rows and a non-zero exit. Heterogeneous rows are normal here --
+    a configuration that failed reports different fields from one that
+    succeeded -- so the union is what the caller means.
+    """
     if not rows:
         return
+    fieldnames = list(rows[0].keys())
+    seen = set(fieldnames)
+    for r in rows[1:]:
+        for k in r:
+            if k not in seen:
+                seen.add(k)
+                fieldnames.append(k)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
 
