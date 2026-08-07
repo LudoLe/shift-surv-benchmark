@@ -250,12 +250,34 @@ def fit_observed_target_oracle(
 def fit_all_observed(
     source_datasets: list[DomainDataset],
     target_dataset: DomainDataset,
+    use_iwcv: bool = False,
+    seed: int = 0,
 ) -> dict:
-    """LR on all observed covariates x — standard ERM baseline."""
+    """LR on all observed covariates x — standard ERM baseline.
+
+    With ``use_iwcv=True`` the regularization strength is chosen on this
+    transfer by importance-weighted cross-validation, the same criterion and
+    the same unit of selection DANN and CDAN already use. Tuning the methods
+    per transfer while leaving the baseline at one global value would make the
+    comparison generous to adaptation, so the baseline gets it too. The default
+    is False: the sensitivity sweep runs every method at the frozen value and
+    must keep doing so.
+
+    Note that only ERM's own C moves. The reference models keep the shared
+    strength deliberately -- they are the same model class, and giving them a
+    per-transfer C would put part of the ERM-to-oracle gap down to
+    regularization rather than to transport.
+    """
     X_train, y_train = _pool_sources(source_datasets, "x")
+    kwargs = dict(_LR_KWARGS)
+    if use_iwcv:
+        from experiments.select import select
+        chosen = select("erm", source_datasets, target_dataset, seed=seed)
+        if chosen is not None:
+            kwargs["C"] = float(chosen)
     return _fit_and_score(X_train, y_train, source_datasets, target_dataset,
                           feature_attr="x", feature_set="all_observed",
-                          model=LogisticRegression(**_LR_KWARGS))
+                          model=LogisticRegression(**kwargs))
 
 
 def fit_prior_recalib(

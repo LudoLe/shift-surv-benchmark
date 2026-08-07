@@ -1140,13 +1140,18 @@ def _run_loco_seed(
     # ERM + target-using DA + multi-source DG (IRM, GroupDRO), all reusing the
     # same per-center source list (DA methods pool it; DG methods group by it).
     method_fns = [
-        ("lr_erm",        lambda: fit_all_observed(src_ds, tgt_ds)),
-        ("iw_erm",        lambda: fit_iw_erm(src_ds, tgt_ds, seed=seed)),
+        ("lr_erm",        lambda: fit_all_observed(src_ds, tgt_ds,
+                                                     use_iwcv=use_iwcv, seed=seed)),
+        ("iw_erm",        lambda: fit_iw_erm(src_ds, tgt_ds, seed=seed,
+                                             use_iwcv=use_iwcv)),
         ("prior_recalib", lambda: fit_prior_recalib(src_ds, tgt_ds)),
         ("platt_scaling", lambda: fit_platt_scaling(src_ds, tgt_ds)),
-        ("coral",         lambda: fit_coral(src_ds, tgt_ds, seed=seed)),
-        ("irm",           lambda: fit_irm(src_ds, tgt_ds, seed=seed)),
-        ("group_dro",     lambda: fit_group_dro(src_ds, tgt_ds, seed=seed)),
+        ("coral",         lambda: fit_coral(src_ds, tgt_ds, seed=seed,
+                                              use_iwcv=use_iwcv)),
+        ("irm",           lambda: fit_irm(src_ds, tgt_ds, seed=seed,
+                                          use_iwcv=use_iwcv)),
+        ("group_dro",     lambda: fit_group_dro(src_ds, tgt_ds, seed=seed,
+                                                use_iwcv=use_iwcv)),
         ("dann",          lambda: fit_dann(src_ds, tgt_ds, seed=seed, use_iwcv=use_iwcv)),
         ("cdan",          lambda: fit_cdan(src_ds, tgt_ds, seed=seed, use_iwcv=use_iwcv)),
     ]

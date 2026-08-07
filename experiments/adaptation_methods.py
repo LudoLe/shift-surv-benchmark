@@ -211,6 +211,7 @@ def fit_coral(
     target_dataset: DomainDataset,
     lambda_: float | None = None,
     seed: int = 0,
+    use_iwcv: bool = False,
 ) -> dict:
     """
     CORAL: CORrelation ALignment.
@@ -225,6 +226,13 @@ def fit_coral(
                      (target features are already in target-space; transform
                      would over-rotate them and degrade performance)
     """
+    # use_iwcv selects the shrinkage on this transfer by the same criterion
+    # DANN and CDAN use, so "tuned" means the same thing across the adaptation
+    # family. An explicit lambda_ still wins: the sensitivity sweep passes none
+    # and leaves use_iwcv False, so it keeps the frozen value.
+    if lambda_ is None and use_iwcv:
+        from experiments.select import select
+        lambda_ = select("coral", source_datasets, target_dataset, seed=seed)
     lambda_ = hparams.get("coral", lambda_)
     X_all, y_all = _pool_sources(source_datasets)
     X_tr, X_val, y_tr, y_val = train_test_split(
@@ -628,6 +636,8 @@ def fit_iw_erm(
     source_datasets: list[DomainDataset],
     target_dataset: DomainDataset,
     seed: int = 0,
+    clip: tuple[float, float] | None = None,
+    use_iwcv: bool = False,
 ) -> dict:
     """
     Importance-weighted ERM (Shimodaira 2000).
@@ -654,7 +664,14 @@ def fit_iw_erm(
     X_tgt_s = scaler.transform(target_dataset.x)
 
     # w(x) on the training points themselves (reweight the empirical risk).
-    sw = _importance_weights(X_tr_s, X_tgt_s, X_eval=X_tr_s)
+    # With use_iwcv the clip bounds are selected on this transfer; the scoring
+    # weights inside the criterion keep the frozen clip, so the criterion does
+    # not move with the candidate being scored.
+    if clip is None and use_iwcv:
+        from experiments.select import select
+        chosen = select("iw_erm", source_datasets, target_dataset, seed=seed)
+        clip = tuple(chosen) if chosen is not None else None
+    sw = _importance_weights(X_tr_s, X_tgt_s, X_eval=X_tr_s, clip=clip)
 
     model = LogisticRegression(**_LR_KWARGS)
     with warnings.catch_warnings():
@@ -690,6 +707,7 @@ def fit_irm(
     lam: float | None = None,
     n_iter: int = 500,
     seed: int = 0,
+    use_iwcv: bool = False,
 ) -> dict:
     """
     IRM, IRMv1 linear formulation (Arjovsky et al. 2019).
@@ -727,6 +745,14 @@ def fit_irm(
     split the other methods take, so the seed-level pairing the sign-flip test
     assumes still holds.
     """
+    # IRM and GroupDRO are selected by leave-one-source-out, never by IWCV: they
+    # do not observe the target at all, so a criterion that weights by target
+    # covariates would give them information the method itself is denied. With a
+    # single source center LOSO is undefined and select() returns None, leaving
+    # the frozen value.
+    if lam is None and use_iwcv:
+        from experiments.select import select
+        lam = select("irm", source_datasets, target_dataset, seed=seed)
     lam = hparams.get("irm", lam)
     from scipy.optimize import minimize
     from scipy.special import expit

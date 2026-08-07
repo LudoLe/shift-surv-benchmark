@@ -145,9 +145,14 @@ def _run_one(
         # never selected or tuned as a compared method. Separates information
         # unavailable in x from margin the unsupervised methods left unrecovered.
         fit_observed_target_oracle(src, tgt, seed=seed),
-        fit_all_observed(src, tgt),
-        fit_iw_erm(src, tgt, seed=seed),
-        fit_coral(src, tgt, seed=seed),
+        # use_iwcv reaches these three too, not only DANN and CDAN. Searching
+        # for the neural methods alone left the comparison asymmetric in the
+        # direction that matters for a negative claim: the paper says nothing
+        # beats ERM, so each method has to have been given the same chance,
+        # and the baseline the same one as the methods.
+        fit_all_observed(src, tgt, use_iwcv=use_iwcv, seed=seed),
+        fit_iw_erm(src, tgt, seed=seed, use_iwcv=use_iwcv),
+        fit_coral(src, tgt, seed=seed, use_iwcv=use_iwcv),
         fit_prior_recalib(src, tgt),
         fit_platt_scaling(src, tgt),
         fit_isotonic(src, tgt),
@@ -170,8 +175,8 @@ def _run_one(
     # are only meaningful with >=2 source centers. With one source both reduce
     # to ERM, so they are computed only in the multi-source regime.
     if len(src) >= 2:
-        results.append(fit_irm(src, tgt, seed=seed))
-        results.append(fit_group_dro(src, tgt, seed=seed))
+        results.append(fit_irm(src, tgt, seed=seed, use_iwcv=use_iwcv))
+        results.append(fit_group_dro(src, tgt, seed=seed, use_iwcv=use_iwcv))
 
     flat_rows = [_flatten(r, scenario, seed) for r in results]
 

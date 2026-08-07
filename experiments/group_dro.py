@@ -148,6 +148,7 @@ def fit_group_dro(
     q_lr: float | None = None,
     l2: float = 1e-3,
     steps: int = 3000,
+    use_iwcv: bool = False,
 ) -> dict:
     """
     GroupDRO on observed covariates x, treating each source center as a group.
@@ -159,6 +160,13 @@ def fit_group_dro(
     Returns the standard SHIFT-SURV result dict (feature_set, source_domains,
     source_pooled, target, target_probs, model, scaler).
     """
+    # Selected by leave-one-source-out, like IRM: GroupDRO never sees the target,
+    # so its criterion must not either. The flag is named use_iwcv only because
+    # it is the one switch the runners thread through for "select per transfer";
+    # what it selects by depends on what the method is allowed to observe.
+    if q_lr is None and use_iwcv:
+        from experiments.select import select
+        q_lr = select("group_dro", source_datasets, target_dataset, seed=seed)
     q_lr = hparams.get("group_dro", q_lr)
     if len(source_datasets) < 2:
         warnings.warn(
