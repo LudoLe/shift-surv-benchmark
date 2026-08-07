@@ -148,11 +148,26 @@ def draw_panel(ax, panel_key: str) -> None:
         # not always the recalibration: under measurement and baseline-hazard
         # shift it is an adversarial method, and a bracket hard-coded to the
         # recalibration bar credited that bar with another one's result.
+        # The max-statistic test names whichever method attains the largest
+        # STUDENTISED gap, which need not be the one with the smallest mean ECE
+        # -- the quantity the bars are ranked by. Under measurement and concept
+        # shift the winner (DANN, CDAN) is therefore not the drawn "best
+        # adaptation" bar, which is CORAL. Skipping the annotation there hid two
+        # significant results, p=0.030 and p=0.008; attaching it to the drawn bar
+        # would have credited CORAL with another method's result. When the winner
+        # has no bar the star spans the whole group instead and names it: a
+        # max-statistic p is a statement about the family, corrected for having
+        # looked at all of it, so the group is the honest thing to mark.
         winner = tested_best(stars, key)
-        if key in stars and winner in drawn:
-            x0, x1 = drawn[ERM], drawn[winner]
+        if key in stars and drawn:
+            if winner in drawn:
+                x0, x1 = drawn[ERM], drawn[winner]
+                tested, note = (ERM, winner), ""
+            else:
+                x0, x1 = min(drawn.values()), max(drawn.values())
+                tested, note = tuple(drawn), winner.replace("_", "-")
             tops = []
-            for m in (ERM, winner):
+            for m in tested:
                 row = summary.get((key, m))
                 mn, c = _f(row, "tgt_ece_mean"), _f(row, "tgt_ece_ci95")
                 cand = [mn + (c if c == c else 0.0)]
@@ -163,11 +178,11 @@ def draw_panel(ax, panel_key: str) -> None:
             yb = (np.nanmax(tops) if tops else 0.0) + 0.012
             ax.plot([x0, x0, x1, x1], [yb - 0.006, yb, yb, yb - 0.006],
                     color="#555555", lw=0.9, zorder=7, solid_capstyle="butt")
-            ax.text(0.5 * (x0 + x1), yb + 0.003, star_of(stars, key),
+            label = star_of(stars, key)
+            if note:
+                label = f"{label} ({note})"
+            ax.text(0.5 * (x0 + x1), yb + 0.003, label,
                     ha="center", va="bottom", fontsize=8.5, color="#333333")
-        elif key in stars:
-            print(f"  ! {key}: il test ha scelto '{winner}', che non e' fra le "
-                  f"barre disegnate — nessuna parentesi")
 
     ax.set_xticks(x)
     ax.set_xticklabels([lbl for _k, lbl in scen], rotation=30, ha="right")

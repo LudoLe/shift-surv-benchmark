@@ -1,0 +1,48 @@
+% =====================================================================
+% Sostituisce il paragrafo §V-D-a e la didascalia di Tab. \ref{tab:real}.
+% Numeri da outputs/tables/i3lung_meta_bytarget.csv (k=6) e
+% i3lung_meta_pairs.csv (k=30), run del 2026-08-07.
+% =====================================================================
+
+\subsubsection{Real multi-center transfer}
+We evaluate every directed transfer between the six I3LUNG centers, thirty in
+all, rather than a chosen subset. Thirty transfers are not thirty independent
+observations: each center appears as the target of five of them, so the same
+patients are scored repeatedly. We therefore pool within target cohort and
+carry six disjoint units into the random-effects meta-analysis, which is the
+level at which the independence assumption holds. The thirty-unit analysis is
+reported alongside it and is uniformly less conservative; we quote the six-unit
+figures throughout.
+
+Discrimination is not recovered by any method. Pooled gaps against ERM are
+$-0.011$ for IW-ERM ($p=0.005$), $-0.033$ for DANN ($p<0.001$), $-0.028$ for
+CDAN ($p<0.001$), and $-0.001$ for CORAL ($p=0.84$). The informative quantity
+is the winner's-curse bound: selecting, for each target cohort, whichever
+method performed best on that cohort, the pooled gap is $-0.000$ with a 95\%
+upper limit of $+0.005$. A gain of the pre-specified clinically relevant size
+$+0.020$ is therefore excluded by the data, not merely unobserved --- an
+equivalence statement rather than an absence of evidence, and one that does not
+rest on the power of any single comparison.
+
+Calibration behaves differently, as it does in the synthetic benchmark. Platt
+scaling improves ECE by $0.018$ ($p=0.003$), and the winner's-curse bound
+reaches $+0.032$, so a clinically relevant calibration gain is \emph{not}
+excluded. Prior recalibration is the informative case: pooled it is the worst
+method by a wide margin ($-0.076$, $p=0.001$), but with $I^2=92\%$ the pooled
+figure describes no individual transfer. It is the best method on transfers
+into SZMC ($+0.069$ and $+0.041$ on the pairwise analysis) and harmful
+elsewhere. That is the behaviour its assumption predicts: it corrects a shift
+in the class prior and nothing else, so it helps exactly where the shift is
+predominantly one of prevalence. Which centers those are is not knowable
+without target labels, which is the practical form of the paper's claim.
+
+% ---------------------------------------------------------------------
+% NOTA: pooling per target aumenta la significativita' di IW-ERM
+% (p=0.107 su 30 coppie, p=0.005 su 6 coorti). Va detto, se no sembra
+% un errore. Frase pronta da inserire in nota a pie' di pagina:
+% ---------------------------------------------------------------------
+% \footnote{Pooling raises rather than lowers the significance of IW-ERM
+% ($p=0.107$ across thirty pairs, $p=0.005$ across six cohorts). Averaging
+% the five transfers that share a target removes variation between source
+% centers while leaving the systematic component, so the pooled estimate is
+% more precise despite resting on fewer units.}

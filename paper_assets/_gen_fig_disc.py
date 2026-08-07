@@ -252,7 +252,17 @@ def draw_panel(ax, panel_key: str) -> None:
             yb = (np.nanmax(tops) if tops else 0.8) + 0.013
             ax.plot([x0, x0, x1, x1], [yb - 0.007, yb, yb, yb - 0.007],
                     color="#555555", lw=0.9, zorder=7, solid_capstyle="butt")
-            ax.text(0.5 * (x0 + x1), yb + 0.004, star_of(stars, key), ha="center", va="bottom",
+            # The test names whichever method attains the largest STUDENTISED
+            # gap; `best` is the largest mean. They usually agree here and did in
+            # the run this figure was written for, but where they do not the
+            # bracket would silently credit the drawn bar with another method's
+            # p-value -- the error fig_cal was fixed for. Naming the winner when
+            # it differs keeps the annotation attributable.
+            label = star_of(stars, key)
+            tested = tested_best(stars, key)
+            if tested and tested != best:
+                label = f"{label} ({tested.replace('_', '-')})"
+            ax.text(0.5 * (x0 + x1), yb + 0.004, label, ha="center", va="bottom",
                     fontsize=8.5, color="#333333")
 
     ax.set_xticks(x)

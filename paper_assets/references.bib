@@ -68,12 +68,15 @@
 % NEEDS VERIFICATION: flagged in the project notes as possibly mis-cited --
 % no paper was found under this exact title. Confirm against the record.
 @article{li2023transfer,
-  author  = {Li, Ziqi and Shen, Yang and Ning, Jing},
+  author  = {Li, Ziqi and Shen, Yu and Ning, Jing},
   title   = {Accommodating time-varying heterogeneity in risk estimation under
              the {Cox} model: A transfer learning approach},
   journal = {J. Amer. Statist. Assoc.},
   volume  = {118},
-  year    = {2023}
+  number  = {544},
+  pages   = {2276--2287},
+  year    = {2023},
+  doi     = {10.1080/01621459.2023.2210336}
 }
 
 @inproceedings{pfisterer2022evaluating,
@@ -363,8 +366,8 @@
                Hauskrecht, Milos},
   title     = {Obtaining well calibrated probabilities using {Bayesian} binning},
   booktitle = {Proc. AAAI Conf. Artif. Intell.},
-  year      = {2015},
-  note      = {NEEDS VERIFICATION}
+  pages     = {2901--2907},
+  year      = {2015}
 }
 
 @inproceedings{guo2017calibration,
@@ -372,11 +375,32 @@
                Weinberger, Kilian Q.},
   title     = {On calibration of modern neural networks},
   booktitle = {Int. Conf. Mach. Learn. (ICML)},
-  year      = {2017},
-  note      = {NEEDS VERIFICATION}
+  series    = {PMLR},
+  volume    = {70},
+  pages     = {1321--1330},
+  year      = {2017}
 }
 
-@article{austin2023bisection,
+% Replaces the austin2023bisection placeholder, which was invented and never
+% existed. Bender et al. is the canonical source for the inversion that turns a
+% uniform draw into a Weibull survival time under a Cox proportional-hazards
+% model -- exactly what generator/base_generator.py does. The bisection that
+% calibrates lambda0 to a target prevalence needs no citation of its own: it is
+% elementary root finding, and the protocol around it is covered by
+% morris2019simulation.
+@article{bender2005generating,
+  author  = {Bender, Ralf and Augustin, Thomas and Blettner, Maria},
+  title   = {Generating survival times to simulate {Cox} proportional
+             hazards models},
+  journal = {Statistics in Medicine},
+  volume  = {24},
+  number  = {11},
+  pages   = {1713--1723},
+  year    = {2005},
+  doi     = {10.1002/sim.2059}
+}
+
+@article{austin2023bisection_REMOVED,
   author  = {Austin, Peter C.},
   title   = {PLACEHOLDER --- calibrating simulation parameters to target
              characteristics by bisection on a fixed super-population},
@@ -393,5 +417,5 @@
   number  = {11},
   pages   = {2074--2102},
   year    = {2019},
-  note    = {NEEDS VERIFICATION}
+  doi     = {10.1002/sim.8086}
 }
