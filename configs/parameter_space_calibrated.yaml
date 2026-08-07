@@ -15,11 +15,11 @@ calibrated_on:
     w_norm: 1.2109375
     sigma: 0.468359375
     lambda0: 0.01971875
-    achieved_w_norm: 0.8201126190839048
-    achieved_sigma: 0.7812465828521442
+    achieved_w_norm: 0.8201125564671998
+    achieved_sigma: 0.7812452860511123
     achieved_lambda0: 0.32792
-    residual_w_norm: 0.00011261908390480802
-    residual_sigma: 0.0012465828521441846
+    residual_w_norm: 0.00011255646719987578
+    residual_sigma: 0.0012452860511122932
     residual_lambda0: 0.0020800000000000263
 calibrated:
   lambda0:
@@ -71,89 +71,89 @@ calibrated:
   - parameter: w_norm
     target: 0.7
     value: 0.65546875
-    achieved: 0.7023124067956799
+    achieved: 0.7023122492359639
     n_iter: 7
     bracketed: true
     endpoints:
-    - 0.5348672779314714
-    - 0.9921092865311943
+    - 0.5348675163243445
+    - 0.992109601142642
     note: weak prognostic signal
     tag: realism
   - parameter: w_norm
     target: 0.82
     value: 1.2109375
-    achieved: 0.8201126190839048
+    achieved: 0.8201125564671998
     n_iter: 6
     bracketed: true
     endpoints:
-    - 0.5348672779314714
-    - 0.9921092865311943
+    - 0.5348675163243445
+    - 0.992109601142642
     note: benchmark default
     tag: realism
   - parameter: w_norm
     target: 0.9
     value: 1.9515624999999996
-    achieved: 0.9033760222963569
+    achieved: 0.9033760934710624
     n_iter: 6
     bracketed: true
     endpoints:
-    - 0.5348672779314714
-    - 0.9921092865311943
+    - 0.5348675163243445
+    - 0.992109601142642
     note: strong but attainable clinically
     tag: realism
   - parameter: w_norm
     target: 0.97
     value: 4.05
-    achieved: 0.9713715135290407
+    achieved: 0.9713714394826574
     n_iter: 1
     bracketed: true
     endpoints:
-    - 0.5348672779314714
-    - 0.9921092865311943
-    note: beyond any real tabular clinical model
+    - 0.5348675163243445
+    - 0.992109601142642
+    note: deliberately extreme relative to the cohorts' empirical AUROC range
     tag: stress
   sigma:
   - parameter: sigma
     target: 0.78
     value: 0.468359375
-    achieved: 0.7812465828521442
+    achieved: 0.7812452860511123
     n_iter: 7
     bracketed: true
     endpoints:
-    - 0.8195117473693506
-    - 0.5452040500905762
+    - 0.8195212220027828
+    - 0.5452040664253686
     note: benchmark default; little lost in observation
     tag: realism
   - parameter: sigma
     target: 0.75
     value: 0.7007812499999999
-    achieved: 0.7487671052139815
+    achieved: 0.7487671964165734
     n_iter: 6
     bracketed: true
     endpoints:
-    - 0.8195117473693506
-    - 0.5452040500905762
+    - 0.8195212220027828
+    - 0.5452040664253686
     note: slightly noisier observation
     tag: realism
   - parameter: sigma
     target: 0.68
     value: 1.25859375
-    achieved: 0.6823336386136667
+    achieved: 0.6823337211951179
     n_iter: 6
     bracketed: true
     endpoints:
-    - 0.8195117473693506
-    - 0.5452040500905762
+    - 0.8195212220027828
+    - 0.5452040664253686
     note: at the weakest real transfer
     tag: realism
   - parameter: sigma
     target: 0.6
     value: 2.653125
-    achieved: 0.6002929497125933
+    achieved: 0.6002941067604001
     n_iter: 4
     bracketed: true
     endpoints:
-    - 0.8195117473693506
-    - 0.5452040500905762
+    - 0.8195212220027828
+    - 0.5452040664253686
     note: observation destroys most of the signal
     tag: stress
