@@ -260,10 +260,43 @@ def _run_seed(
 
     results = []
 
+    # DomainDataset-compatible views of this transfer. They used to be built
+    # further down, for DANN and CDAN only, which is why the per-transfer
+    # selection reached the leave-one-centre-out path and not this one: ERM,
+    # IW-ERM and CORAL are fitted inline here rather than through the shared
+    # functions, so threading use_iwcv through those functions did nothing for
+    # the thirty pairwise transfers. Building the views first lets every method
+    # be selected on the transfer it is evaluated on, which is what Table II
+    # claims.
+    class _DS:
+        def __init__(self, x, y, domain_id):
+            self.x = x
+            self.y = y.astype(float)
+            self.domain_id = domain_id
+            self.n = len(y)
+            # DANN/CDAN require these attributes; they are not latent factors
+            # here and are never read as such.
+            self.u_inv = x
+            self.u_spu = x[:, :2]
+
+    src_ds = [_DS(X_tr, y_tr, domain_id=0)]   # 80% source train
+    tgt_ds = _DS(X_tgt_imp, y_tgt, domain_id=1)
+
+    _sel = {}
+    if use_iwcv:
+        from experiments.select import select
+        for _m in ("erm", "iw_erm", "coral"):
+            _v = select(_m, src_ds, tgt_ds, seed=seed)
+            if _v is not None:
+                _sel[_m] = _v
+
     # --- LR ERM ---
+    _erm_kw = dict(_LR_KWARGS)
+    if "erm" in _sel:
+        _erm_kw["C"] = float(_sel["erm"])
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=ConvergenceWarning)
-        lr = LogisticRegression(**_LR_KWARGS)
+        lr = LogisticRegression(**_erm_kw)
         lr.fit(X_tr_s, y_tr)
     p_val = lr.predict_proba(X_val_s)[:, 1]
     p_tgt = lr.predict_proba(X_tgt_s)[:, 1]
@@ -279,10 +312,11 @@ def _run_seed(
     # classifier), the consistent correction under covariate shift.  Weights
     # estimated on the training points themselves (the risk being reweighted).
     from experiments.adaptation_methods import _importance_weights
-    sw = _importance_weights(X_tr_s, X_tgt_s, X_eval=X_tr_s)
+    sw = _importance_weights(X_tr_s, X_tgt_s, X_eval=X_tr_s,
+                             clip=tuple(_sel["iw_erm"]) if "iw_erm" in _sel else None)
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=ConvergenceWarning)
-        lr_iw = LogisticRegression(**_LR_KWARGS)
+        lr_iw = LogisticRegression(**_erm_kw)
         lr_iw.fit(X_tr_s, y_tr, sample_weight=sw)
     p_val_iw = lr_iw.predict_proba(X_val_s)[:, 1]
     p_tgt_iw = lr_iw.predict_proba(X_tgt_s)[:, 1]
@@ -329,9 +363,16 @@ def _run_seed(
 
     # --- CORAL ---
     from adapt.feature_based import CORAL as _CORAL
+    # lambda_ was hardcoded to 1.0 here while Table II reported the selected
+    # 0.3, so the real pairwise transfers ran a CORAL the paper did not
+    # describe. It now takes the per-transfer selection, falling back to the
+    # frozen value.
+    from experiments import hparams as _hp_local
     coral = _CORAL(
-        estimator=LogisticRegression(**_LR_KWARGS),
-        Xt=X_tgt_s, lambda_=1.0, verbose=0, random_state=seed,
+        estimator=LogisticRegression(**_erm_kw),
+        Xt=X_tgt_s,
+        lambda_=float(_sel.get("coral", _hp_local.get("coral"))),
+        verbose=0, random_state=seed,
     )
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore")
@@ -345,22 +386,9 @@ def _run_seed(
         "tgt_probs": np.asarray(p_tgt_c),
     })
 
-    # Build DomainDataset-compatible objects for DANN/CDAN
-    # We create minimal objects with .x, .y, .domain_id, .n attributes
-    class _DS:
-        def __init__(self, x, y, domain_id):
-            self.x = x
-            self.y = y.astype(float)
-            self.domain_id = domain_id
-            self.n = len(y)
-            # DANN/CDAN also need u_inv, u_spu — not used here
-            self.u_inv = x
-            self.u_spu = x[:, :2]
 
     # Pass already-imputed (but not yet scaled) data — fit_dann/fit_cdan
     # will do their own scaling internally. We pass raw imputed arrays.
-    src_ds = [_DS(X_tr, y_tr, domain_id=0)]   # 80% source train
-    tgt_ds  = _DS(X_tgt_imp, y_tgt, domain_id=1)
 
     # --- DANN ---
     try:
