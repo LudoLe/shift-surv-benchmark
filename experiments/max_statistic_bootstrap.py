@@ -96,8 +96,22 @@ def max_stat(D: np.ndarray, names: list[str]):
     return names[k], float(t_obs[k]), float(mean[k]), p
 
 
-def analyse(prefix: str) -> None:
+def analyse(prefix: str, exclude: list[str] | None = None) -> None:
     paths = sorted(glob.glob(os.path.join(TABLES, f"{prefix}*_bootreps.csv")))
+    # A prefix is a substring, so --prefix i3lung also matches i3lung_loco_*.
+    # Those are leave-one-centre-out folds of a domain-generalization design,
+    # not single-source transfers: pooling them together mixes the two things
+    # fig:disc (a) and (b) exist to keep apart. The same collision was fixed in
+    # meta_analysis.py and not here.
+    if exclude:
+        dropped = [p for p in paths if any(x in os.path.basename(p) for x in exclude)]
+        paths = [p for p in paths if p not in dropped]
+        if dropped:
+            print(f"  esclusi {len(dropped)} file per --exclude {' '.join(exclude)}:")
+            for d in dropped[:6]:
+                print(f"    {os.path.basename(d)}")
+            if len(dropped) > 6:
+                print(f"    ... e altri {len(dropped) - 6}")
     if not paths:
         raise SystemExit(
             f"nessun file {prefix}*_bootreps.csv in {TABLES}.\n"
@@ -108,12 +122,20 @@ def analyse(prefix: str) -> None:
     per_transfer = {os.path.basename(p).replace("_bootreps.csv", ""): load_bootreps(p)
                     for p in paths}
     print(f"transfer trovati: {len(per_transfer)}")
+    for name in sorted(per_transfer):
+        print(f"    {name}")
 
     for field, label in FIELDS.items():
         print(f"\n{'='*74}\n{label}\n{'='*74}")
         print(f"{'transfer':<34}{'best':>16}{'gap':>10}{'p':>10}")
 
         pooled: dict[str, dict[int, float]] = defaultdict(dict)
+        # Per method, not per file: IRM and GroupDRO only appear where there are
+        # at least two source centres, so dividing their sum by the total number
+        # of transfers scaled their pooled gap down by the ratio of the two
+        # counts. The studentised statistic is scale-invariant and the p-value
+        # was unaffected, but the printed gap was not.
+        n_by_method: dict[str, int] = defaultdict(int)
         for name, bm in sorted(per_transfer.items()):
             methods = sorted(m for m in bm
                              if m != ERM and m not in EXCLUDE[field])
@@ -126,6 +148,7 @@ def analyse(prefix: str) -> None:
             star = "*" if p < 0.05 else " "
             print(f"{name:<34}{best:>16}{gap:>+10.4f}{p:>9.4f}{star}")
             for m, row in zip(methods, D):
+                n_by_method[m] += 1
                 for b, v in zip(common, row):
                     pooled[m][b] = pooled[m].get(b, 0.0) + v
 
@@ -133,11 +156,17 @@ def analyse(prefix: str) -> None:
         if len(per_transfer) > 1 and pooled:
             methods = sorted(pooled)
             common = sorted(set.intersection(*(set(pooled[m]) for m in methods)))
-            n_t = len(per_transfer)
-            D = np.array([[pooled[m][b] / n_t for b in common] for m in methods])
+            D = np.array([[pooled[m][b] / n_by_method[m] for b in common]
+                          for m in methods])
             best, _, gap, p = max_stat(D, methods)
             star = "*" if p < 0.05 else " "
             print(f"{'POOLED (media sui transfer)':<34}{best:>16}{gap:>+10.4f}{p:>9.4f}{star}")
+            partial = {m: n for m, n in n_by_method.items()
+                       if n != len(per_transfer)}
+            if partial:
+                print("    nota: non tutti i metodi compaiono in tutti i "
+                      f"{len(per_transfer)} transfer; medie su "
+                      + ", ".join(f"{m}={n}" for m, n in sorted(partial.items())))
 
     print("\n  '*' = p < 0.05. Test unilaterale: positivo significa meglio di ERM.")
 
@@ -146,7 +175,12 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--prefix", default="i3lung",
                     help="prefisso dei file <prefix>*_bootreps.csv")
-    analyse(ap.parse_args().prefix)
+    ap.add_argument("--exclude", nargs="*", default=None, metavar="SUBSTR",
+                    help="scarta i file il cui nome contiene una di queste "
+                         "sottostringhe: --prefix i3lung --exclude loco tiene "
+                         "solo i transfer a coppie")
+    args = ap.parse_args()
+    analyse(args.prefix, exclude=args.exclude)
 
 
 if __name__ == "__main__":

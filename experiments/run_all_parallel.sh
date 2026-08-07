@@ -163,5 +163,9 @@ if (( ${#failed[@]} )); then
   exit 1
 fi
 echo
-echo "=== next: python -m experiments.max_statistic_bootstrap --prefix i3lung"
+# --exclude loco: the prefix is a substring, so i3lung also matches the
+# leave-one-centre-out folds, which are a different design and must not be
+# pooled with the pairwise transfers.
+echo "=== next: python -m experiments.max_statistic_bootstrap --prefix i3lung --exclude loco"
+echo "===       python -m experiments.max_statistic_bootstrap --prefix i3lung_loco"
 echo "===       python -m experiments.max_statistic_bootstrap --prefix public"
