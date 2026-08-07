@@ -113,7 +113,10 @@ for entry in "${jobs_list[@]}"; do
   # per cell against one for everything else. Off by default: it is only valid
   # while that assumption holds, so it has to be asked for.
   REUSE_ARG=()
-  [ "${REUSE:-0}" = 1 ] && REUSE_ARG=(--reuse_methods dann cdan)
+  # --reuse_dir points at the archive: the block above has already moved the
+  # previous tables out of outputs/tables, so without it every job dies on a
+  # missing raw CSV.
+  [ "${REUSE:-0}" = 1 ] && REUSE_ARG=(--reuse_methods dann cdan --reuse_dir "$ARCHIVE")
   $(_pin_prefix "${#pids[@]}") python -m experiments.run_adaptation $args \
       "${REUSE_ARG[@]}" \
       --n_seeds "$N_SEEDS" --out_prefix "$prefix" \

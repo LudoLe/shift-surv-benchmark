@@ -76,6 +76,7 @@ from experiments.baselines import (
 )
 from experiments.adaptation_methods import fit_coral, fit_dann, fit_cdan, fit_iw_erm, fit_irm
 from experiments.group_dro import fit_group_dro
+import pathlib
 from utils.io import save_table_csv
 
 _TABLES = _ROOT / "outputs" / "tables"
@@ -601,7 +602,8 @@ def _print_implementation_report(
 
 
 def _load_reused(methods: frozenset, prefix: str, scenarios: list[str],
-                 seeds: list[int], verbose: bool = True) -> list[dict]:
+                 seeds: list[int], reuse_dir: str | None = None,
+                 verbose: bool = True) -> list[dict]:
     """Rows for `methods` from a previous <prefix>_raw.csv, one per (scenario, seed).
 
     Refuses to return a partial set. Reusing rows is only safe while the reused
@@ -616,7 +618,11 @@ def _load_reused(methods: frozenset, prefix: str, scenarios: list[str],
     exactly that, and run_n_sweep appends the per-n suffix for the same reason.
     """
     import csv as _csv
-    path = _TABLES / f"{prefix}_raw.csv"
+    # reuse_dir, not always _TABLES: run_all_synthetic.sh archives the previous
+    # tables out of outputs/tables before it starts, so by the time a job runs,
+    # the rows it wants to reuse are in the archive directory. Reading from
+    # _TABLES unconditionally made the whole feature fail at launch.
+    path = (pathlib.Path(reuse_dir) if reuse_dir else _TABLES) / f"{prefix}_raw.csv"
     if not path.exists():
         raise SystemExit(f"--reuse_methods: {path} non esiste")
     want = {(sc, int(s), m) for sc in scenarios for s in seeds for m in methods}
@@ -651,6 +657,7 @@ def run_adaptation(
     arch_grid: list | None = None,
     reuse_methods: list[str] | None = None,
     reuse_from: str | None = None,
+    reuse_dir: str | None = None,
     verbose: bool = True,
 ) -> dict:
     """
@@ -679,7 +686,8 @@ def run_adaptation(
     reused_rows: list[dict] = []
     if reuse:
         reused_rows = _load_reused(reuse, reuse_from or out_prefix,
-                                   scenarios, seeds, verbose=verbose)
+                                   scenarios, seeds, reuse_dir=reuse_dir,
+                                   verbose=verbose)
 
     all_rows:  list[dict] = []
     all_hp:    list[dict] = []
@@ -786,6 +794,7 @@ def run_n_sweep(
     out_prefix: str = "n_sweep",
     reuse_methods: list[str] | None = None,
     reuse_from: str | None = None,
+    reuse_dir: str | None = None,
     verbose: bool = True,
 ) -> None:
     """
@@ -813,6 +822,7 @@ def run_n_sweep(
             reuse_methods=reuse_methods,
             reuse_from=(f"{reuse_from}_n{n}" if reuse_from
                         else f"{out_prefix}_n{n}") if reuse_methods else None,
+            reuse_dir=reuse_dir,
             nl_strength=nl_strength,
             out_prefix=f"{out_prefix}_n{n}",
             verbose=verbose,
@@ -943,6 +953,10 @@ if __name__ == "__main__":
         "--reuse_from", default=None, metavar="PREFIX",
         help="prefisso da cui leggerle (default: lo stesso out_prefix)")
     parser.add_argument(
+        "--reuse_dir", default=None, metavar="DIR",
+        help="directory da cui leggerle (default: outputs/tables). Serve perche' "
+             "run_all_synthetic.sh archivia le tabelle precedenti prima di partire")
+    parser.add_argument(
         "--no_iwcv", dest="use_iwcv", action="store_false",
         help="Disable IWCV; use source-only validation instead.",
     )
@@ -977,6 +991,7 @@ if __name__ == "__main__":
             use_iwcv=args.use_iwcv,
             reuse_methods=args.reuse_methods,
             reuse_from=args.reuse_from,
+            reuse_dir=args.reuse_dir,
             nl_strength=args.nl_strength,
             out_prefix=args.out_prefix,
             verbose=not args.quiet,
@@ -990,6 +1005,7 @@ if __name__ == "__main__":
             use_iwcv=args.use_iwcv,
             reuse_methods=args.reuse_methods,
             reuse_from=args.reuse_from,
+            reuse_dir=args.reuse_dir,
             nl_strength=args.nl_strength,
             out_prefix=args.out_prefix,
             verbose=not args.quiet,

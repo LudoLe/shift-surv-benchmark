@@ -632,6 +632,40 @@ def _fast_ece(y: np.ndarray, p: np.ndarray, n_bins: int = 10) -> float:
     return float(np.abs(sy - sp).sum() / len(y))
 
 
+def _aligned_prob_matrices(prob_accum: dict, verbose: bool = True) -> dict:
+    """Stack per-seed probabilities over the seeds EVERY method produced.
+
+    A DANN or CDAN fit that raises is caught per seed and yields tgt_probs=None,
+    so that method ends up with one fewer row than the rest. The per-seed
+    bootstrap requires identical (n_seeds, n_tgt) shapes and raises otherwise --
+    and it raises before any table is written, so a single failed fit discarded
+    the raw, summary, bootstrap and shift-diagnostic CSVs of a transfer that had
+    just cost ten seeds of computation.
+
+    Restricting to the common seeds keeps the comparison paired, which is what
+    the shape check was protecting: every method is then evaluated on the same
+    seeds, just possibly fewer of them. The drop is printed rather than
+    absorbed, since an interval over eight seeds is not the one the protocol
+    describes and the reader of the log has to know.
+    """
+    have = {m: dict(d) for m, d in prob_accum.items() if d}
+    if not have:
+        return {}
+    common = set.intersection(*(set(d) for d in have.values()))
+    if not common:
+        if verbose:
+            print("  ATTENZIONE: nessun seed comune a tutti i metodi, "
+                  "bootstrap saltato")
+        return {}
+    dropped = {m: sorted(set(d) - common) for m, d in have.items() if set(d) - common}
+    if dropped and verbose:
+        for m, ss in dropped.items():
+            print(f"  ATTENZIONE: {m} manca sui seed {ss}; il bootstrap usa i "
+                  f"{len(common)} seed comuni a tutti i metodi")
+    order = sorted(common)
+    return {m: np.vstack([d[s] for s in order]) for m, d in have.items()}
+
+
 def _bootstrap_real_gaps_per_seed(
     prob_by_method: dict[str, np.ndarray],
     y_tgt: np.ndarray,
@@ -980,7 +1014,7 @@ def _run_transfer(
               f"{target_center}: {tgt_df[label_col].mean():.3f}")
 
     all_rows: list[dict] = []
-    prob_accum: dict[str, list[np.ndarray]] = {}
+    prob_accum: dict[str, dict[int, np.ndarray]] = {}
     y_tgt_ref: np.ndarray | None = None
     for seed in seeds:
         if verbose:
@@ -993,7 +1027,7 @@ def _run_transfer(
             all_rows.append(_flatten_real(r, seed))
             probs = r.get("tgt_probs")
             if probs is not None and np.asarray(probs).size == len(y_tgt):
-                prob_accum.setdefault(r["method"], []).append(np.asarray(probs))
+                prob_accum.setdefault(r["method"], {})[seed] = np.asarray(probs)
 
     agg = _aggregate_real(all_rows)
 
@@ -1011,7 +1045,7 @@ def _run_transfer(
     boot_by_seed: list[dict] = []
     boot_ens_rows: list[dict] = []
     if y_tgt_ref is not None:
-        prob_by_method = {m: np.vstack(P) for m, P in prob_accum.items() if P}
+        prob_by_method = _aligned_prob_matrices(prob_accum, verbose=verbose)
         boot_rows = _bootstrap_real_gaps_per_seed(
             prob_by_method, y_tgt_ref, reference="lr_erm",
             replicate_sink=boot_reps, seed_summary_sink=boot_by_seed,
@@ -1197,7 +1231,7 @@ def run_i3lung_loco(
 
     for target in names:
         all_rows: list[dict] = []
-        prob_accum: dict[str, list[np.ndarray]] = {}
+        prob_accum: dict[str, dict[int, np.ndarray]] = {}
         y_ref: np.ndarray | None = None
         if verbose:
             print(f"\n=== target = {target}  (sources = {[c for c in names if c != target]}) ===")
@@ -1210,7 +1244,7 @@ def run_i3lung_loco(
                 all_rows.append(_flatten_real(r, seed))
                 probs = r.get("tgt_probs")
                 if probs is not None and np.asarray(probs).size == len(y_tgt):
-                    prob_accum.setdefault(r["method"], []).append(np.asarray(probs))
+                    prob_accum.setdefault(r["method"], {})[seed] = np.asarray(probs)
 
         agg = _aggregate_real(all_rows)
         # Same headline/comparison pair as _run_transfer: the per-seed bootstrap
@@ -1220,7 +1254,7 @@ def run_i3lung_loco(
         boot_by_seed: list[dict] = []
         boot_ens: list[dict] = []
         if y_ref is not None:
-            prob_by_method = {m: np.vstack(P) for m, P in prob_accum.items() if P}
+            prob_by_method = _aligned_prob_matrices(prob_accum, verbose=verbose)
             boot = _bootstrap_real_gaps_per_seed(
                 prob_by_method, y_ref, reference="lr_erm",
                 replicate_sink=boot_reps, seed_summary_sink=boot_by_seed)
