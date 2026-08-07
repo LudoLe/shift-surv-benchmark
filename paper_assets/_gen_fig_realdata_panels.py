@@ -165,13 +165,13 @@ def main() -> None:
     auroc_lim, auroc_ticks = (-0.055, 0.032), [-0.04, -0.02, 0.0, 0.02]
     ece_lim, ece_ticks = (-0.085, 0.045), [-0.08, -0.04, 0.0, 0.04]
 
-    panel(I3_DISC,  tables, "auroc", "AUROC gap (method $-$ ERM)",
+    panel(I3_DISC,  tables, "auroc", r"$\Delta$AUROC",
           "fig_i3lung_disc", auroc_lim, auroc_ticks)
-    panel(I3_CAL,   tables, "ece",   "ECE gain (ERM $-$ method)",
+    panel(I3_CAL,   tables, "ece",   r"$\Delta$ECE",
           "fig_i3lung_cal", ece_lim, ece_ticks)
-    panel(REG_DISC, tables, "auroc", "AUROC gap (method $-$ ERM)",
+    panel(REG_DISC, tables, "auroc", r"$\Delta$AUROC",
           "fig_registry_disc", auroc_lim, auroc_ticks)
-    panel(REG_CAL,  tables, "ece",   "ECE gain (ERM $-$ method)",
+    panel(REG_CAL,  tables, "ece",   r"$\Delta$ECE",
           "fig_registry_cal", ece_lim, ece_ticks)
 
 

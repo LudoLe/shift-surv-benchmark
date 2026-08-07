@@ -167,8 +167,8 @@ def main() -> None:
 
     res = series(args.prior_dir)
 
-    panel(res, 0, 1, "Best DA $-$ ERM (target AUROC)", "fig_nsweep_a")
-    panel(res, 2, 3, "Calibration recovery (ERM $-$ prior-EM ECE)", "fig_nsweep_b")
+    panel(res, 0, 1, r"$\Delta$AUROC", "fig_nsweep_a")
+    panel(res, 2, 3, r"$\Delta$ECE", "fig_nsweep_b")
 
     print("\nvalues used (mean [95% CI]):")
     for scenario, label, _ in SCENARIOS:

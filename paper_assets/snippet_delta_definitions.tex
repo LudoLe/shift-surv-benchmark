@@ -1,0 +1,32 @@
+% =====================================================================
+% Definizione di Delta AUROC e Delta ECE.
+%
+% Serve perche' gli assi ora portano solo il simbolo: le formule sono
+% state tolte dalle etichette su richiesta, insieme a "(lower is better)"
+% e alle frecce nelle intestazioni di tabella. Senza questa definizione il
+% segno di Delta ECE e' ambiguo -- e' orientato al contrario di Delta
+% AUROC, di proposito.
+%
+% Collocazione: fine di IV-A (protocollo di valutazione), prima dei
+% risultati. Una volta sola; le didascalie rimandano qui.
+% =====================================================================
+
+Throughout, differences against ERM are written
+\[
+  \Delta\mathrm{AUROC} \;=\; \mathrm{AUROC}_{\text{method}} - \mathrm{AUROC}_{\text{ERM}},
+  \qquad
+  \Delta\mathrm{ECE} \;=\; \mathrm{ECE}_{\text{ERM}} - \mathrm{ECE}_{\text{method}},
+\]
+both evaluated on the target cohort. The two are signed in opposite
+directions so that a positive value means the method improved on ERM in
+either case; AUROC rewards larger values and ECE smaller ones, and a
+single sign convention would have made the sign of an improvement depend
+on which panel one is reading.
+
+% ---------------------------------------------------------------------
+% Riga da aggiungere in coda alle didascalie di fig:disc, fig:cal,
+% fig:nsweep e delle due figure sui dati reali, al posto delle formule
+% tolte dagli assi:
+% ---------------------------------------------------------------------
+% $\Delta$AUROC and $\Delta$ECE are defined in Section~\ref{sec:setup};
+% positive is better for both.

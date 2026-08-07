@@ -68,8 +68,10 @@ def make():
     rl.append("\\setlength{\\tabcolsep}{5pt}")
     rl.append("\\begin{tabular}{l cccc}")
     rl.append("\\toprule")
-    rl.append("& \\multicolumn{2}{c}{Target C-index $\\uparrow$}"
-              " & \\multicolumn{2}{c}{Target AUROC$/$td-AUC@$\\tau$ $\\uparrow$} \\\\")
+    # No direction arrows in the header: they say what the reader already knows
+    # of a concordance measure, and they belong to the caption if anywhere.
+    rl.append("& \\multicolumn{2}{c}{Target C-index}"
+              " & \\multicolumn{2}{c}{Target AUROC$/$td-AUC@$\\tau$} \\\\")
     rl.append("\\cmidrule(lr){2-3}\\cmidrule(lr){4-5}")
     rl.append("Scenario & Oracle & Source & Source (td) & ERM (Tab.~\\ref{tab:auroc}) \\\\")
     rl.append("\\midrule")

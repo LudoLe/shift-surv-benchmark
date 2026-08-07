@@ -186,7 +186,12 @@ def draw_panel(ax, panel_key: str) -> None:
 
     ax.set_xticks(x)
     ax.set_xticklabels([lbl for _k, lbl in scen], rotation=30, ha="right")
-    ax.set_ylabel("Target ECE  (lower is better)")
+    # Axis labels name the quantity and nothing else. "(lower is better)" and
+    # arrows are the caption's job: on the axis they read as part of the
+    # measurement, and a reader who already knows what ECE is has to parse them
+    # anyway. The sign conventions for the differenced panels are defined once,
+    # in the figure captions.
+    ax.set_ylabel("Target ECE")
     # Headroom for the legend, which sits top-left and would otherwise land on
     # the baseline-hazard bracket -- the tallest group in every panel.
     top = max(0.34, ax.get_ylim()[1])
