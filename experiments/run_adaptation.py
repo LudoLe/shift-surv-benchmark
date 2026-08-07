@@ -126,6 +126,7 @@ def _run_one(
     nl_strength: float,
     lambda_grid: list | None,
     arch_grid: list | None,
+    reuse_methods: frozenset = frozenset(),
 ) -> tuple[list[dict], list[dict], list[dict], dict]:
     """Generate one scenario/seed, fit all methods, return (flat_rows, hp_rows, loss_rows, calib_rows)."""
     from generator.parameters import BaseParams
@@ -156,19 +157,25 @@ def _run_one(
         fit_prior_recalib(src, tgt),
         fit_platt_scaling(src, tgt),
         fit_isotonic(src, tgt),
-        fit_dann(
-            src, tgt, seed=seed,
-            use_iwcv=use_iwcv,
-            lambda_grid=lambda_grid,
-            arch_grid=arch_grid,
-        ),
-        fit_cdan(
-            src, tgt, seed=seed,
-            use_iwcv=use_iwcv,
-            lambda_grid=lambda_grid,
-            arch_grid=arch_grid,
-        ),
     ]
+
+    # DANN and CDAN already searched per (scenario, seed) before this protocol
+    # change, and neither their code nor their inputs moved: their fits do not
+    # depend on any other method's hyperparameter. Recomputing them costs about
+    # ten trainings each per cell and reproduces numbers already on disk, so
+    # --reuse_methods takes those rows from a previous raw CSV instead. Every
+    # cell is checked for presence at load time; a missing one is an error, not
+    # a silently shorter table.
+    if "dann" not in reuse_methods:
+        results.append(fit_dann(
+            src, tgt, seed=seed, use_iwcv=use_iwcv,
+            lambda_grid=lambda_grid, arch_grid=arch_grid,
+        ))
+    if "cdan" not in reuse_methods:
+        results.append(fit_cdan(
+            src, tgt, seed=seed, use_iwcv=use_iwcv,
+            lambda_grid=lambda_grid, arch_grid=arch_grid,
+        ))
 
     # IRM and GroupDRO are multi-source domain-generalization methods: their
     # objectives (IRMv1 cross-environment penalty; GroupDRO worst-group risk)
@@ -592,6 +599,46 @@ def _print_implementation_report(
 # Main runner
 # ---------------------------------------------------------------------------
 
+
+def _load_reused(methods: frozenset, prefix: str, scenarios: list[str],
+                 seeds: list[int], verbose: bool = True) -> list[dict]:
+    """Rows for `methods` from a previous <prefix>_raw.csv, one per (scenario, seed).
+
+    Refuses to return a partial set. Reusing rows is only safe while the reused
+    method's code and inputs are unchanged; a missing cell is the signal that
+    the assumption does not hold for this run, and continuing would produce a
+    table that is quietly shorter for two methods than for the other nine.
+
+    The match is on (scenario, seed, method) and NOT on n_per_domain, which the
+    raw rows do not carry. Reusing across a different n therefore looks like a
+    clean hit and is silently wrong. Reuse from the same prefix, which is the
+    same command and so the same n; run_all_synthetic.sh with REUSE=1 does
+    exactly that, and run_n_sweep appends the per-n suffix for the same reason.
+    """
+    import csv as _csv
+    path = _TABLES / f"{prefix}_raw.csv"
+    if not path.exists():
+        raise SystemExit(f"--reuse_methods: {path} non esiste")
+    want = {(sc, int(s), m) for sc in scenarios for s in seeds for m in methods}
+    rows, got = [], set()
+    with open(path) as fh:
+        for r in _csv.DictReader(fh):
+            key = (r.get("scenario"), int(r.get("seed", -1)), r.get("method"))
+            if key in want:
+                rows.append(r)
+                got.add(key)
+    missing = want - got
+    if missing:
+        ex = sorted(missing)[:5]
+        raise SystemExit(
+            f"--reuse_methods: {len(missing)} celle mancanti in {path.name}, "
+            f"per esempio {ex}. Rilancia senza --reuse_methods.")
+    if verbose:
+        print(f"  riuso {len(rows)} righe ({', '.join(sorted(methods))}) "
+              f"da {path.name}")
+    return rows
+
+
 def run_adaptation(
     scenarios: list[str] = CORE_SCENARIOS,
     seeds: list[int] | None = None,
@@ -602,6 +649,8 @@ def run_adaptation(
     out_prefix: str = "benchmark_1s1t",
     lambda_grid: list | None = None,
     arch_grid: list | None = None,
+    reuse_methods: list[str] | None = None,
+    reuse_from: str | None = None,
     verbose: bool = True,
 ) -> dict:
     """
@@ -622,6 +671,15 @@ def run_adaptation(
     # and only produced by _run_one, when there are >=2 source centers.
     if n_source_domains >= 2:
         methods = methods + ["irm", "group_dro"]
+
+    # Reused rows are loaded up front, before anything is written, so a run
+    # whose reuse source is the prefix it will itself overwrite still reads the
+    # previous contents.
+    reuse = frozenset(reuse_methods or ())
+    reused_rows: list[dict] = []
+    if reuse:
+        reused_rows = _load_reused(reuse, reuse_from or out_prefix,
+                                   scenarios, seeds, verbose=verbose)
 
     all_rows:  list[dict] = []
     all_hp:    list[dict] = []
@@ -644,6 +702,7 @@ def run_adaptation(
                 nl_strength=nl_strength,
                 lambda_grid=lambda_grid,
                 arch_grid=arch_grid,
+                reuse_methods=reuse,
             )
             all_rows.extend(flat_rows)
             all_hp.extend(hp_rows)
@@ -659,6 +718,9 @@ def run_adaptation(
                 )
                 print(f"({done}/{n_total})  {summary}", flush=True)
 
+    # Spliced before aggregation, so summary and compact are computed over the
+    # union and cannot disagree with raw.
+    all_rows.extend(reused_rows)
     agg     = _aggregate(all_rows, scenarios, methods)
     compact = _compact_table(agg, scenarios, methods)
 
@@ -722,6 +784,8 @@ def run_n_sweep(
     use_iwcv: bool = True,
     nl_strength: float = 0.0,
     out_prefix: str = "n_sweep",
+    reuse_methods: list[str] | None = None,
+    reuse_from: str | None = None,
     verbose: bool = True,
 ) -> None:
     """
@@ -744,6 +808,11 @@ def run_n_sweep(
             seeds=seeds,
             n_per_domain=n,
             use_iwcv=use_iwcv,
+            # Each n has its own prefix, so the reuse source has to follow it:
+            # reusing n=2000 rows inside the n=250 run would be silent nonsense.
+            reuse_methods=reuse_methods,
+            reuse_from=(f"{reuse_from}_n{n}" if reuse_from
+                        else f"{out_prefix}_n{n}") if reuse_methods else None,
             nl_strength=nl_strength,
             out_prefix=f"{out_prefix}_n{n}",
             verbose=verbose,
@@ -867,6 +936,13 @@ if __name__ == "__main__":
         help="Use IWCV for DANN/CDAN HP selection (default: on).",
     )
     parser.add_argument(
+        "--reuse_methods", nargs="+", default=None, metavar="M",
+        help="metodi le cui righe si prendono da un raw CSV precedente invece "
+             "di ricalcolarle (tipicamente: dann cdan)")
+    parser.add_argument(
+        "--reuse_from", default=None, metavar="PREFIX",
+        help="prefisso da cui leggerle (default: lo stesso out_prefix)")
+    parser.add_argument(
         "--no_iwcv", dest="use_iwcv", action="store_false",
         help="Disable IWCV; use source-only validation instead.",
     )
@@ -899,6 +975,8 @@ if __name__ == "__main__":
             scenarios=scenarios,
             seeds=seeds,
             use_iwcv=args.use_iwcv,
+            reuse_methods=args.reuse_methods,
+            reuse_from=args.reuse_from,
             nl_strength=args.nl_strength,
             out_prefix=args.out_prefix,
             verbose=not args.quiet,
@@ -910,6 +988,8 @@ if __name__ == "__main__":
             n_per_domain=args.n,
             n_source_domains=args.n_source_domains,
             use_iwcv=args.use_iwcv,
+            reuse_methods=args.reuse_methods,
+            reuse_from=args.reuse_from,
             nl_strength=args.nl_strength,
             out_prefix=args.out_prefix,
             verbose=not args.quiet,

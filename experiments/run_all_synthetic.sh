@@ -106,7 +106,16 @@ for entry in "${jobs_list[@]}"; do
   args="${entry#*|}"
   while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n 2>/dev/null || sleep 2; done
   echo "  [$(date +%T)] start  $prefix"
+  # REUSE=1 takes the DANN and CDAN rows from the previous run of the same
+  # prefix instead of recomputing them. Their code and inputs are unchanged by
+  # the symmetric-tuning switch -- their fits do not depend on any other
+  # method's hyperparameter -- and they are the expensive part, ten trainings
+  # per cell against one for everything else. Off by default: it is only valid
+  # while that assumption holds, so it has to be asked for.
+  REUSE_ARG=()
+  [ "${REUSE:-0}" = 1 ] && REUSE_ARG=(--reuse_methods dann cdan)
   $(_pin_prefix "${#pids[@]}") python -m experiments.run_adaptation $args \
+      "${REUSE_ARG[@]}" \
       --n_seeds "$N_SEEDS" --out_prefix "$prefix" \
       > "outputs/logs/${prefix}.log" 2>&1 &
   pids+=("$!")
