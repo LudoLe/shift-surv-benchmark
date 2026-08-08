@@ -19,8 +19,10 @@ assumption the oracle does not use.
 
 Panel a: single source, best of IW-ERM / CORAL / DANN / CDAN  (benchmark_1s1t_iwcv)
 Panel b: three sources, best of IRM / GroupDRO                (benchmark_3s1t)
-label-prior comes from its dedicated prefix in both, since prior_shift is in
-APPENDIX_SCENARIOS and the main benchmark does not emit it.
+label-prior comes from its dedicated prefix in both. prior_shift has since moved
+into CORE_SCENARIOS, so the main benchmark now emits it too; the dedicated prefix
+is still read because the tables on disk predate that move. After the next full
+re-run this can read label-prior from the main prefix like every other regime.
 
 Run from repo root:
     python paper_assets/_gen_fig_cal.py
@@ -207,9 +209,9 @@ def draw_panel(ax, panel_key: str) -> None:
     ax.set_axisbelow(True)
 
     ax.legend(handles=[
-        Patch(facecolor=C_OBS_ORACLE, label="Observed-data target oracle"),
+        Patch(facecolor=C_OBS_ORACLE, label="Target-data oracle"),
         Line2D([0], [0], color=C_LAT_ORACLE, lw=1.3, ls=(0, (4, 2)),
-               label="Latent oracle"),
+               label="Latent-feature reference"),
         Patch(facecolor=C_ERM, label="ERM"),
         Patch(facecolor=cfg["colour"], label=cfg["family_label"]),
         Patch(facecolor=C_RECAL, label="Best recalibration"),

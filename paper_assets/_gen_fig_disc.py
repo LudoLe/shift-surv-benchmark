@@ -61,10 +61,11 @@ ERM = "all_observed"
 LATENT_ORACLE = "invariant_oracle"
 OBSERVED_ORACLE = "observed_target_oracle"
 
-# prior_shift lives in APPENDIX_SCENARIOS, so run_adaptation's main run does not
-# emit it and it has a dedicated prefix. Reading it from there keeps the figure
-# on six regimes; without this the panel silently drops to five, which is how
-# the omission was found.
+# prior_shift has moved into CORE_SCENARIOS, so run_adaptation's main run now
+# emits it -- but the tables on disk predate that move, so label-prior is still
+# read from its dedicated prefix. Reading it from there keeps the figure on six
+# regimes; without this the panel silently drops to five, which is how the
+# omission was found. Retire this map once the main prefixes carry prior_shift.
 PRIOR_PREFIX = {"a": "benchmark_1s1t_prior", "b": "benchmark_3s1t_prior"}
 
 PANELS = {
@@ -279,9 +280,9 @@ def draw_panel(ax, panel_key: str) -> None:
     ax.set_axisbelow(True)
 
     ax.legend(handles=[
-        Patch(facecolor=C_OBS_ORACLE, label="Observed-data target oracle"),
+        Patch(facecolor=C_OBS_ORACLE, label="Target-data oracle"),
         Line2D([0], [0], color=C_LAT_ORACLE, lw=1.3, ls=(0, (4, 2)),
-               label="Latent oracle"),
+               label="Latent-feature reference"),
         Patch(facecolor=C_ERM, label="ERM"),
         Patch(facecolor=cfg["colour"], label=cfg["family_label"]),
     ], loc="upper left", frameon=False, fontsize=7.5, ncol=2,
