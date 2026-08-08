@@ -29,6 +29,8 @@ gens=(
   "_gen_fig_nsweep.py"           # fig_nsweep_a/b      sweep numerosita'
   "_gen_fig_whyfails.py"         # fig_whyfails_a/b    geometria decisionale
   "_gen_fig_realdata_panels.py"  # fig_i3lung_*, fig_registry_*
+  "_gen_fig_predictability.py"   # fig_predictability
+  "_gen_fig3_dissociation.py"    # fig3_dissociation
 )
 tables=(
   "_gen_table_scenarios.py"      # table_scenarios.tex
