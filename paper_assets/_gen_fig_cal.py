@@ -160,14 +160,20 @@ def draw_panel(ax, panel_key: str) -> None:
         # has no bar the star spans the whole group instead and names it: a
         # max-statistic p is a statement about the family, corrected for having
         # looked at all of it, so the group is the honest thing to mark.
+        # The bracket always spans the whole group, never ERM-to-winner. The
+        # max-statistic p is a statement about the family -- some method among
+        # the seven improves, corrected for having looked at all of them -- not
+        # about a pair, so a bracket over two bars asserts something narrower
+        # than the test supports. It also made the width mean two different
+        # things at once: wide because the winner had no bar (measurement,
+        # concept) or wide because the winner happened to be the far bar
+        # (label-prior), which a reader cannot tell apart. The winner is named
+        # in the caption instead.
         winner = tested_best(stars, key)
         if key in stars and drawn:
-            if winner in drawn:
-                x0, x1 = drawn[ERM], drawn[winner]
-                tested, note = (ERM, winner), ""
-            else:
-                x0, x1 = min(drawn.values()), max(drawn.values())
-                tested, note = tuple(drawn), winner.replace("_", "-")
+            x0, x1 = min(drawn.values()), max(drawn.values())
+            tested = tuple(drawn)
+            note = "" if winner in drawn else winner.replace("_", "-")
             tops = []
             for m in tested:
                 row = summary.get((key, m))
@@ -188,7 +194,7 @@ def draw_panel(ax, panel_key: str) -> None:
             # prints the line to paste.
             ax.text(0.5 * (x0 + x1), yb + 0.003, star_of(stars, key),
                     ha="center", va="bottom", fontsize=8.5, color="#333333")
-            if note:
+            if winner:
                 _caption_notes.append((key, winner, star_of(stars, key)))
 
     ax.set_xticks(x)
@@ -227,7 +233,16 @@ _caption_notes: list = []
 
 
 def _print_caption_notes(what: str) -> None:
-    if not _caption_notes:
+    """Caption line naming the method the test selected, significant cases only.
+
+    Where the result is not significant the identity of the best method carries
+    no claim, so listing it lengthens the caption without adding anything. Where
+    it is significant the reader has to be told, because the bracket spans the
+    group and the winning method is not always one of the drawn bars.
+    """
+    sig = [(k, m, s) for k, m, s in _caption_notes if s and s != "n.s."]
+    _caption_notes.clear()
+    if not sig:
         return
     LABEL = {"covariate_shift": "covariate", "observational_shift": "measurement",
              "spurious_shift": "spurious", "baseline_hazard_shift": "baseline-hazard",
@@ -237,12 +252,11 @@ def _print_caption_notes(what: str) -> None:
               "prior_recalib": "prior adjustment", "platt_scaling": "Platt scaling",
               "isotonic": "isotonic"}
     parts = [f"{PRETTY.get(m, m)} under {LABEL.get(k, k)} shift ({s})"
-             for k, m, s in _caption_notes]
+             for k, m, s in sig]
     print(f"\n  RIGA DA AGGIUNGERE ALLA DIDASCALIA di {what}:")
-    print("    Stars mark the max-statistic test over the full comparison set; "
-          "the method attaining it is " + "; ".join(parts) +
-          ", which is not drawn as a separate bar.")
-
+    print("    The bracket spans the compared methods and the star is the "
+          "family-level max-statistic result; the method attaining it is "
+          + "; ".join(parts) + ".")
 
 def main() -> None:
     ap = argparse.ArgumentParser()
@@ -258,7 +272,7 @@ def main() -> None:
                         bbox_inches="tight")
         plt.close(fig)
         print(f"  scritto {args.outdir}/fig_cal_{panel}.{{pdf,png}}")
-    _print_caption_notes("fig:cal")
+        _print_caption_notes(f"fig:cal panel {panel}")
 
 
 if __name__ == "__main__":

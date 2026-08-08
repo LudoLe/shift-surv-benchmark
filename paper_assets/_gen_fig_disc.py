@@ -238,6 +238,9 @@ def draw_panel(ax, panel_key: str) -> None:
         # floating over the whole group reads as a statement about the oracle
         # bars too, which no test was run on.
         if key in stars:
+            # Spans the coloured bars of the group, for the same reason as in
+            # _gen_fig_cal: the statistic is a family-level one and a bracket
+            # over a chosen pair would claim more than it supports.
             x0, x1 = x[i] - 0.5 * w * 1.15, x[i] + 0.5 * w * 1.15
             tops = []
             for m in (ERM, best):
@@ -261,7 +264,7 @@ def draw_panel(ax, panel_key: str) -> None:
             # it differs keeps the annotation attributable.
             # Name off the panel, into the caption: see _gen_fig_cal.py.
             tested = tested_best(stars, key)
-            if tested and tested != best:
+            if tested:
                 _caption_notes.append((key, tested, star_of(stars, key)))
             ax.text(0.5 * (x0 + x1), yb + 0.004, star_of(stars, key),
                     ha="center", va="bottom", fontsize=8.5, color="#333333")
@@ -297,7 +300,16 @@ _caption_notes: list = []
 
 
 def _print_caption_notes(what: str) -> None:
-    if not _caption_notes:
+    """Caption line naming the method the test selected, significant cases only.
+
+    Where the result is not significant the identity of the best method carries
+    no claim, so listing it lengthens the caption without adding anything. Where
+    it is significant the reader has to be told, because the bracket spans the
+    group and the winning method is not always one of the drawn bars.
+    """
+    sig = [(k, m, s) for k, m, s in _caption_notes if s and s != "n.s."]
+    _caption_notes.clear()
+    if not sig:
         return
     LABEL = {"covariate_shift": "covariate", "observational_shift": "measurement",
              "spurious_shift": "spurious", "baseline_hazard_shift": "baseline-hazard",
@@ -307,12 +319,11 @@ def _print_caption_notes(what: str) -> None:
               "prior_recalib": "prior adjustment", "platt_scaling": "Platt scaling",
               "isotonic": "isotonic"}
     parts = [f"{PRETTY.get(m, m)} under {LABEL.get(k, k)} shift ({s})"
-             for k, m, s in _caption_notes]
+             for k, m, s in sig]
     print(f"\n  RIGA DA AGGIUNGERE ALLA DIDASCALIA di {what}:")
-    print("    Stars mark the max-statistic test over the full comparison set; "
-          "the method attaining it is " + "; ".join(parts) +
-          ", which is not drawn as a separate bar.")
-
+    print("    The bracket spans the compared methods and the star is the "
+          "family-level max-statistic result; the method attaining it is "
+          + "; ".join(parts) + ".")
 
 def main() -> None:
     ap = argparse.ArgumentParser()
@@ -329,7 +340,7 @@ def main() -> None:
             fig.savefig(out, bbox_inches="tight")
         plt.close(fig)
         print(f"  scritto {args.outdir}/fig_disc_{panel}.{{pdf,png}}")
-    _print_caption_notes("fig:disc")
+        _print_caption_notes(f"fig:disc panel {panel}")
 
 
 if __name__ == "__main__":
