@@ -178,29 +178,37 @@ def _by_target(pairs, loco, idx):
 
 
 def panel_forest(ax, per_unit, reg_vals, methods, xlabel, show_margin):
+    """One clean strip per method: cohorts on the row line, registry just below.
+
+    No jitter: with eight methods and up to six cohorts each, scattering points
+    around the row makes it impossible to tell which row a mark belongs to, which
+    is the one thing the reader has to be able to do here.
+    """
     ys = np.arange(len(methods))[::-1]
+    for k, y in enumerate(ys):
+        if k % 2 == 0:
+            ax.axhspan(y - 0.5, y + 0.5, color="#F7F7F7", zorder=0)
     ax.axvline(0.0, color="#777777", lw=0.9, zorder=1)
     if show_margin:
-        ax.axvline(MARGIN, color="#BBBBBB", lw=0.9, ls=(0, (3, 2)), zorder=1)
-        ax.axvline(-MARGIN, color="#BBBBBB", lw=0.9, ls=(0, (3, 2)), zorder=1)
+        for v in (-MARGIN, MARGIN):
+            ax.axvline(v, color="#C4C4C4", lw=0.9, ls=(0, (3, 2)), zorder=1)
     for y, m in zip(ys, methods):
         col = C_ADAPT if m in ADAPT else (C_RECAL if m in RECAL else C_GENER)
         vals = list(per_unit.get(m, {}).values())
-        if not vals:
-            continue
-        jit = (np.random.default_rng(abs(hash(m)) % 2**32).random(len(vals)) - .5) * .28
-        ax.scatter(vals, y + jit, s=17, facecolors="none", edgecolors=col,
-                   linewidths=1.0, zorder=3)
-        mu = float(np.mean(vals))
-        ax.scatter([mu], [y], marker="D", s=46, color=col, zorder=4)
+        if vals:
+            ax.scatter(vals, [y + 0.13] * len(vals), s=15, facecolors="none",
+                       edgecolors=col, linewidths=0.9, zorder=3)
+            ax.scatter([float(np.mean(vals))], [y + 0.13], marker="D", s=40,
+                       color=col, zorder=4)
         rv = reg_vals.get(m, [])
         if rv:
-            ax.scatter(rv, [y - 0.30] * len(rv), marker="^", s=20, color=col,
-                       alpha=0.85, zorder=3)
-    ax.set_yticks(ys); ax.set_yticklabels([LABEL.get(m, m) for m in methods])
+            ax.scatter(rv, [y - 0.22] * len(rv), marker="|", s=60, color=col,
+                       linewidths=1.4, zorder=3)
+    ax.set_yticks(ys)
+    ax.set_yticklabels([LABEL.get(m, m) for m in methods])
     ax.set_xlabel(xlabel)
-    ax.set_ylim(-0.7, len(methods) - 0.3)
-    ax.grid(axis="x", color="#EDEDED", lw=0.7)
+    ax.set_ylim(-0.6, len(methods) - 0.4)
+    ax.grid(axis="x", color="#E4E4E4", lw=0.6, zorder=0)
     for sp in ("top", "right", "left"):
         ax.spines[sp].set_visible(False)
     ax.tick_params(axis="y", length=0)
@@ -221,7 +229,7 @@ def main() -> None:
           f"{len(reg)} direzioni registry")
 
     # --- main paper: method effects, two panels -----------------------------
-    fig, axes = plt.subplots(1, 2, figsize=(7.1, 3.0), sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(7.1, 3.4), sharey=True)
     panel_forest(axes[0], _by_target(pairs, loco, 1), _reg_deltas(reg, 1),
                  methods, r"$\Delta$AUROC", True)
     axes[0].set_title("(a) discrimination", loc="left", fontsize=9)
@@ -229,12 +237,14 @@ def main() -> None:
                  methods, r"$\Delta$ECE", False)
     axes[1].set_title("(b) calibration", loc="left", fontsize=9)
     from matplotlib.lines import Line2D
-    axes[0].legend(handles=[
+    fig.legend(handles=[
         Line2D([], [], marker="o", ls="", mfc="none", mec="#555555",
                label="I3LUNG target cohort"),
         Line2D([], [], marker="D", ls="", color="#555555", label="pooled"),
-        Line2D([], [], marker="^", ls="", color="#555555", label="registry direction"),
-    ], loc="upper right", frameon=False, fontsize=7.5, handletextpad=0.4)
+        Line2D([], [], marker="|", ls="", color="#555555", markersize=8,
+               label="registry direction"),
+    ], loc="lower center", bbox_to_anchor=(0.5, -0.06), ncol=3, frameon=False,
+       fontsize=8, handletextpad=0.4, columnspacing=1.8)
     fig.tight_layout()
     os.makedirs(args.outdir, exist_ok=True)
     for ext in ("pdf", "png"):
