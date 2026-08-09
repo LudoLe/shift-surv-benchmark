@@ -138,12 +138,23 @@ def _center_to_df(
 ) -> pd.DataFrame:
     """Binarise one survival centre to a fixed-horizon label at ``tau`` months.
 
-    Mirrors the I3LUNG ``OS_6`` protocol:
       y=1  if event observed before tau        (t < tau and delta == 1)
       y=0  if event-free through tau            (t >= tau)
       drop if censored before tau               (t < tau and delta == 0)
+
     Rows censored before the horizon have an unknown label and are dropped,
-    exactly as ``load_i3lung`` drops rows with missing OS_6.
+    which is the same handling ``load_i3lung`` gives to a missing OS_6.
+
+    NOTE ON POLARITY. This is the opposite of I3LUNG's. Verified against the
+    outcome table: patients with OS_6 = 1 have a median overall survival of 17.2
+    months and none below six, while those with OS_6 = 0 have a median of 2.5
+    months and all below six -- so OS_6 = 1 means alive at the horizon, whereas
+    y = 1 here means the event occurred. Each cohort is internally consistent,
+    so a model simply learns the direction its own label defines and AUROC and
+    ECE are unaffected. What is not interchangeable is prevalence: the I3LUNG
+    figure is a survival fraction and this one an event fraction, so the two are
+    not comparable without flipping one of them. The synthetic generator follows
+    the convention used here, not I3LUNG's.
     """
     t = np.asarray(center["t"], dtype=float)
     d = np.asarray(center["delta"], dtype=int)
