@@ -178,7 +178,8 @@ def panel_swarm(ax, pairs, centers, by, ylabel):
     ax.set_xticklabels(centers, rotation=45, ha="right")
     ax.set_xlabel(f"{by.capitalize()} center")
     ax.set_ylabel(ylabel)
-    ax.grid(axis="y", color="#EDEDED", lw=0.7, zorder=0)
+    ax.grid(axis="y", color="#F0F0F0", lw=0.6, zorder=0)
+    ax.set_axisbelow(True)
     for sp in ("top", "right"):
         ax.spines[sp].set_visible(False)
 
@@ -216,13 +217,10 @@ def panel_forest(ax, per_unit, reg_vals, methods, xlabel, show_margin):
     is the one thing the reader has to be able to do here.
     """
     ys = np.arange(len(methods))[::-1]
-    for k, y in enumerate(ys):
-        if k % 2 == 0:
-            ax.axhspan(y - 0.5, y + 0.5, color="#F7F7F7", zorder=0)
-    ax.axvline(0.0, color="#777777", lw=0.9, zorder=1)
+    ax.axvline(0.0, color="#666666", lw=0.9, zorder=1)
     if show_margin:
         for v in (-MARGIN, MARGIN):
-            ax.axvline(v, color="#C4C4C4", lw=0.9, ls=(0, (3, 2)), zorder=1)
+            ax.axvline(v, color="#CCCCCC", lw=0.8, ls=(0, (3, 3)), zorder=1)
     for y, m in zip(ys, methods):
         col = C_ADAPT if m in ADAPT else (C_RECAL if m in RECAL else C_GENER)
         vals = list(per_unit.get(m, {}).values())
@@ -239,7 +237,9 @@ def panel_forest(ax, per_unit, reg_vals, methods, xlabel, show_margin):
     ax.set_yticklabels([LABEL.get(m, m) for m in methods])
     ax.set_xlabel(xlabel)
     ax.set_ylim(-0.6, len(methods) - 0.4)
-    ax.grid(axis="x", color="#E4E4E4", lw=0.6, zorder=0)
+    # _style sets a y grid for the bar figures; these are strip plots and the
+    # rows are already separated by their labels, so it is only clutter here.
+    ax.grid(False)
     for sp in ("top", "right", "left"):
         ax.spines[sp].set_visible(False)
     ax.tick_params(axis="y", length=0)
