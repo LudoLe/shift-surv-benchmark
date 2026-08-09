@@ -152,6 +152,37 @@ def panel_heatmap(ax, pairs, centers):
     cb.ax.tick_params(labelsize=7)
 
 
+def panel_swarm(ax, pairs, centers, by, ylabel):
+    """ERM target AUROC for the thirty transfers, grouped by source or by target.
+
+    Grouping the same thirty points twice is the point: a center that is
+    uniformly poor as a source and unremarkable as a target shows up as a low
+    column in one panel and an ordinary one in the other, which no pooled
+    estimate and no single grouping can show.
+    """
+    groups = {c: [] for c in centers}
+    for (s_c, t_c), d in pairs.items():
+        v = d.get(ERM)
+        if v:
+            groups[s_c if by == "source" else t_c].append(v[1])
+    ax.axhline(0.5, color="#C0C0C0", lw=0.9, ls=(0, (3, 2)), zorder=1)
+    for i, c in enumerate(centers):
+        vals = sorted(groups[c])
+        off = (np.arange(len(vals)) - (len(vals) - 1) / 2) * 0.11
+        ax.scatter([i + o for o in off], vals, s=26, facecolors="none",
+                   edgecolors="#1F6FB4", linewidths=1.1, zorder=3)
+        if vals:
+            ax.plot([i - 0.26, i + 0.26], [np.median(vals)] * 2,
+                    color="#D95F0E", lw=1.6, zorder=4)
+    ax.set_xticks(range(len(centers)))
+    ax.set_xticklabels(centers, rotation=45, ha="right")
+    ax.set_xlabel(f"{by.capitalize()} center")
+    ax.set_ylabel(ylabel)
+    ax.grid(axis="y", color="#EDEDED", lw=0.7, zorder=0)
+    for sp in ("top", "right"):
+        ax.spines[sp].set_visible(False)
+
+
 def _by_target(pairs, loco, idx):
     """method -> {target: mean delta against ERM over the transfers into it}.
 
@@ -252,6 +283,22 @@ def main() -> None:
                     bbox_inches="tight")
     plt.close(fig)
     print(f"  scritto {args.outdir}/fig_real.{{pdf,png}}")
+
+    # --- supplement: the same thirty transfers, grouped twice ---------------
+    # Grouping by source and by target answers the objection the source panel
+    # alone invites -- that the poor centre is simply a hard one -- so the two
+    # panels only make the point together.
+    figs, axs = plt.subplots(1, 2, figsize=(7.0, 2.9), sharey=True)
+    panel_swarm(axs[0], pairs, centers, "source", "ERM target AUROC")
+    panel_swarm(axs[1], pairs, centers, "target", "")
+    axs[0].set_title("(a) grouped by source", loc="left", fontsize=9)
+    axs[1].set_title("(b) grouped by target", loc="left", fontsize=9)
+    figs.tight_layout()
+    for ext in ("pdf", "png"):
+        figs.savefig(os.path.join(args.outdir, f"fig_swarm.{ext}"), dpi=200,
+                     bbox_inches="tight")
+    plt.close(figs)
+    print(f"  scritto {args.outdir}/fig_swarm.{{pdf,png}}")
 
     # --- supplement: the directional heatmap --------------------------------
     figh, axh = plt.subplots(figsize=(3.6, 3.1))
