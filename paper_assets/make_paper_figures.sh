@@ -30,7 +30,8 @@ gens=(
   "_gen_fig_whyfails.py"         # fig_whyfails_a/b    geometria decisionale
   "_gen_fig_realdata_panels.py"  # fig_i3lung_*, fig_registry_*
   "_gen_fig_predictability.py"   # fig_predictability
-  "_gen_fig_real.py"             # fig_real, fig_heatmap
+  "_gen_fig_realmain.py"         # fig_realmain  (main paper)
+  "_gen_fig_real.py"             # fig_swarm_*, fig_heatmap  (supplement)
   "_gen_fig3_dissociation.py"    # fig3_dissociation
 )
 tables=(

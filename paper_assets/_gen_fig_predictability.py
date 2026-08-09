@@ -88,25 +88,7 @@ def _spearman(a, b) -> float:
     return float(A @ B / den) if den else float("nan")
 
 
-def panel(ax, rows, xkey, xlabel, highlight):
-    x = [r[xkey] for r in rows]
-    y = [r["drop"] for r in rows]
-    hi = [r["source"] == highlight for r in rows]
-    ax.axhline(0.0, color="#999999", lw=0.8, zorder=1)
-    ax.scatter([v for v, h in zip(x, hi) if not h],
-               [v for v, h in zip(y, hi) if not h],
-               s=26, facecolors="none", edgecolors=C_PT, linewidths=1.1, zorder=3)
-    ax.scatter([v for v, h in zip(x, hi) if h],
-               [v for v, h in zip(y, hi) if h],
-               s=34, color=C_HL, zorder=4, label=f"source: {highlight}")
-    ax.set_xlabel(xlabel)
-    rho = _spearman(x, y)
-    ax.text(0.97, 0.04, rf"Spearman $\rho={rho:+.2f}$", transform=ax.transAxes,
-            ha="right", va="bottom", fontsize=8.5, color="#333333")
-    ax.grid(axis="both", color="#EDEDED", lw=0.7)
-    for sp in ("top", "right"):
-        ax.spines[sp].set_visible(False)
-    return rho
+PALETTE = ["#4C72B0", "#55A868", "#C44E52", "#8172B2", "#937860", "#DA8BC3"]
 
 
 def main() -> None:
@@ -119,22 +101,42 @@ def main() -> None:
     rows = load(args.tables)
     if not rows:
         raise SystemExit(f"nessun transfer pairwise trovato in {args.tables}")
-    print(f"  {len(rows)} transfer")
+    sources = sorted({r["source"] for r in rows})
+    colour = {c: PALETTE[i % len(PALETTE)] for i, c in enumerate(sources)}
 
-    fig, axes = plt.subplots(1, 2, figsize=(7.0, 2.9), sharey=True)
-    r1 = panel(axes[0], rows, "mmd", "Covariate distance (RBF-MMD)", args.highlight)
-    r2 = panel(axes[1], rows, "prev_gap", "Prevalence gap", args.highlight)
-    axes[0].set_ylabel("ERM AUROC loss\n(source $-$ target)")
-    axes[1].legend(loc="upper right", frameon=False, fontsize=8.5)
+    fig, ax = plt.subplots(figsize=(3.5, 2.9))
+    ax.axhline(0.0, color="#999999", lw=0.8, zorder=1)
+    for c in sources:
+        pts = [r for r in rows if r["source"] == c]
+        hi = (c == args.highlight)
+        ax.scatter([r["mmd"] for r in pts], [r["drop"] for r in pts],
+                   s=34 if hi else 24,
+                   facecolors=colour[c] if hi else "none",
+                   edgecolors=colour[c], linewidths=1.2,
+                   zorder=4 if hi else 3, label=c)
+    rho = _spearman([r["mmd"] for r in rows], [r["drop"] for r in rows])
+    # Reported descriptively and with no fitted line: the thirty transfers share
+    # six source centres and are not independent, so a regression line would
+    # assert a model the design does not support.
+    ax.text(0.97, 0.95, rf"Spearman $\rho={rho:+.2f}$", transform=ax.transAxes,
+            ha="right", va="top", fontsize=8, color="#333333")
+    ax.set_xlabel("Source--target RBF-MMD")
+    ax.set_ylabel("ERM AUROC loss (source $-$ target)")
+    ax.grid(axis="both", color="#F0F0F0", lw=0.6)
+    ax.set_axisbelow(True)
+    for sp in ("top", "right"):
+        ax.spines[sp].set_visible(False)
+    ax.legend(title="Source centre", loc="lower left", frameon=False,
+              fontsize=6.8, title_fontsize=7, handletextpad=0.3,
+              borderpad=0.2, labelspacing=0.25)
     fig.tight_layout()
 
     os.makedirs(args.outdir, exist_ok=True)
-    for ext in ("pdf", "png"):
-        fig.savefig(os.path.join(args.outdir, f"fig_predictability.{ext}"),
-                    dpi=200, bbox_inches="tight")
+    for ext, kw in (("pdf", {}), ("png", {"dpi": 300})):
+        fig.savefig(os.path.join(args.outdir, f"fig_predictability.{ext}"), **kw)
     plt.close(fig)
-    print(f"  scritto {args.outdir}/fig_predictability.{{pdf,png}}")
-    print(f"  Spearman: MMD {r1:+.3f}   prevalence gap {r2:+.3f}")
+    print(f"  scritto {args.outdir}/fig_predictability.{{pdf,png}}   "
+          f"{len(rows)} transfer, Spearman {rho:+.3f}")
 
 
 if __name__ == "__main__":
