@@ -245,6 +245,14 @@ def panel_forest(ax, per_unit, reg_vals, methods, xlabel, show_margin):
     ax.tick_params(axis="y", length=0)
 
 
+def _save(fig, outdir, name):
+    for ext in ("pdf", "png"):
+        fig.savefig(os.path.join(outdir, f"{name}.{ext}"), dpi=200,
+                    bbox_inches="tight")
+    plt.close(fig)
+    print(f"  scritto {outdir}/{name}.{{pdf,png}}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tables", default=TABLES)
@@ -258,57 +266,34 @@ def main() -> None:
     methods = ADAPT + RECAL + GENER
     print(f"  {len(pairs)} transfer, {len(centers)} centri, {len(loco)} fold LOCO, "
           f"{len(reg)} direzioni registry")
-
-    # --- main paper: method effects, two panels -----------------------------
-    fig, axes = plt.subplots(1, 2, figsize=(7.1, 3.4), sharey=True)
-    panel_forest(axes[0], _by_target(pairs, loco, 1), _reg_deltas(reg, 1),
-                 methods, r"$\Delta$AUROC", True)
-    axes[0].set_title("(a) discrimination", loc="left", fontsize=9)
-    panel_forest(axes[1], _by_target(pairs, loco, 2), _reg_deltas(reg, 2),
-                 methods, r"$\Delta$ECE", False)
-    axes[1].set_title("(b) calibration", loc="left", fontsize=9)
-    from matplotlib.lines import Line2D
-    fig.legend(handles=[
-        Line2D([], [], marker="o", ls="", mfc="none", mec="#555555",
-               label="I3LUNG target cohort"),
-        Line2D([], [], marker="D", ls="", color="#555555", label="pooled"),
-        Line2D([], [], marker="|", ls="", color="#555555", markersize=8,
-               label="registry direction"),
-    ], loc="lower center", bbox_to_anchor=(0.5, -0.06), ncol=3, frameon=False,
-       fontsize=8, handletextpad=0.4, columnspacing=1.8)
-    fig.tight_layout()
     os.makedirs(args.outdir, exist_ok=True)
-    for ext in ("pdf", "png"):
-        fig.savefig(os.path.join(args.outdir, f"fig_real.{ext}"), dpi=200,
-                    bbox_inches="tight")
-    plt.close(fig)
-    print(f"  scritto {args.outdir}/fig_real.{{pdf,png}}")
 
-    # --- supplement: the same thirty transfers, grouped twice ---------------
-    # Grouping by source and by target answers the objection the source panel
-    # alone invites -- that the poor centre is simply a hard one -- so the two
-    # panels only make the point together.
-    figs, axs = plt.subplots(1, 2, figsize=(7.0, 2.9), sharey=True)
-    panel_swarm(axs[0], pairs, centers, "source", "ERM target AUROC")
-    panel_swarm(axs[1], pairs, centers, "target", "")
-    axs[0].set_title("(a) grouped by source", loc="left", fontsize=9)
-    axs[1].set_title("(b) grouped by target", loc="left", fontsize=9)
-    figs.tight_layout()
-    for ext in ("pdf", "png"):
-        figs.savefig(os.path.join(args.outdir, f"fig_swarm.{ext}"), dpi=200,
-                     bbox_inches="tight")
-    plt.close(figs)
-    print(f"  scritto {args.outdir}/fig_swarm.{{pdf,png}}")
+    # One panel per file, so the paper composes them as subfigures and controls
+    # sizing and captions itself. Each panel therefore carries its own axes and
+    # legend rather than sharing them across a grid.
+    for name, idx, xlabel, margin in (
+        ("fig_real_auroc", 1, r"$\Delta$AUROC", True),
+        ("fig_real_ece",   2, r"$\Delta$ECE",   False),
+    ):
+        fig, ax = plt.subplots(figsize=(3.5, 3.2))
+        panel_forest(ax, _by_target(pairs, loco, idx), _reg_deltas(reg, idx),
+                     methods, xlabel, margin)
+        # No legend inside the panel: at one column wide there is no free
+        # space and it lands on the data. The three markers are described in
+        # the caption instead.
+        fig.tight_layout()
+        _save(fig, args.outdir, name)
 
-    # --- supplement: the directional heatmap --------------------------------
-    figh, axh = plt.subplots(figsize=(3.6, 3.1))
-    panel_heatmap(axh, pairs, centers)
-    figh.tight_layout()
-    for ext in ("pdf", "png"):
-        figh.savefig(os.path.join(args.outdir, f"fig_heatmap.{ext}"), dpi=200,
-                     bbox_inches="tight")
-    plt.close(figh)
-    print(f"  scritto {args.outdir}/fig_heatmap.{{pdf,png}}")
+    for by in ("source", "target"):
+        fig, ax = plt.subplots(figsize=(3.5, 2.9))
+        panel_swarm(ax, pairs, centers, by, "ERM target AUROC")
+        fig.tight_layout()
+        _save(fig, args.outdir, f"fig_swarm_{by}")
+
+    fig, ax = plt.subplots(figsize=(3.6, 3.1))
+    panel_heatmap(ax, pairs, centers)
+    fig.tight_layout()
+    _save(fig, args.outdir, "fig_heatmap")
 
 
 if __name__ == "__main__":
