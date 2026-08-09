@@ -157,6 +157,15 @@ def main() -> None:
     # no bar in it. Overriding the family keeps test and figure on the same set.
     ap.add_argument("--adapt_methods", nargs="+", default=None, metavar="M",
                     help=f"famiglia da confrontare con ERM (default: {ADAPT})")
+    # The recalibration set is not fixed either. Prior adjustment uses the
+    # unlabeled target covariates, so it does not belong in a protocol whose
+    # premise is that the target is not observed: leaving it in makes a
+    # significant result there mean "a method that sees the target helps",
+    # which contradicts the row it is reported under. Platt and isotonic use
+    # only the source validation split and stay.
+    ap.add_argument("--recal_methods", nargs="+", default=None, metavar="M",
+                    help=f"famiglia di ricalibrazione per il test su ECE "
+                         f"(default: {RECAL})")
     args = ap.parse_args()
 
     data = load_raw(args.raw)
@@ -169,7 +178,8 @@ def main() -> None:
     rows = run("tgt_auroc", "high", adapt,
                "DISCRIMINATION  --  best adaptation method vs ERM (target AUROC)",
                data, metric_name="auroc")
-    rows += run("tgt_ece", "low", RECAL + adapt,
+    recal = args.recal_methods if args.recal_methods is not None else RECAL
+    rows += run("tgt_ece", "low", recal + adapt,
                 "CALIBRATION  --  best method vs ERM (target ECE, lower is better)",
                 data, metric_name="ece")
 
