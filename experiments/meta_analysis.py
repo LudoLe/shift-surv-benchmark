@@ -205,7 +205,65 @@ def _target_of(name: str) -> str:
     return name.split("_")[-1]
 
 
-def _collapse_by_target(data_metric: dict, transfers: list[str]) -> tuple[dict, list[str]]:
+def _bootstrap_target_se(prefix: str, target: str, sources: list[str],
+                         metric: str, methods: list[str]) -> dict:
+    """SE of the within-target mean effect, taken from the joint bootstrap.
+
+    The five transfers into one centre are evaluated on the same patients, so
+    their errors are correlated and combining them as independent understates
+    the SE of their mean. Measured on I3LUNG the understatement reaches 27% for
+    IW-ERM, which propagates straight into the pooled interval the paper's main
+    claim rests on.
+
+    The bootstrap replicate index resamples the same target patients in every
+    transfer into that centre -- verified: all five files carry the identical
+    (b, seed_idx) grid -- so averaging the five effects *within* a replicate and
+    taking the spread across replicates reproduces the correlation without
+    having to model it. Returns {} when the replicate files are absent, and the
+    caller keeps the analytic combination.
+    """
+    field = "d_auroc" if metric == "auroc" else "d_ece"
+    per_source = []
+    for s_c in sources:
+        path = _TABLES / f"{prefix}_{s_c}_{target}_bootreps.csv"
+        if not path.exists():
+            return {}
+        acc: dict = {}
+        with open(path) as fh:
+            for r in csv.DictReader(fh):
+                m = r.get("method")
+                if m not in methods:
+                    continue
+                try:
+                    acc.setdefault(m, {}).setdefault(int(r["b"]), []).append(
+                        float(r[field]))
+                except (KeyError, ValueError):
+                    continue
+        per_source.append({m: {b: float(np.mean(v)) for b, v in d.items()}
+                           for m, d in acc.items()})
+    if len(per_source) < 2:
+        return {}
+
+    out = {}
+    for m in methods:
+        if not all(m in p for p in per_source):
+            continue
+        bs = sorted(set.intersection(*(set(p[m]) for p in per_source)))
+        if len(bs) < 2:
+            continue
+        joint = np.array([[p[m][b] for p in per_source] for b in bs])
+        se = float(joint.mean(axis=1).std(ddof=1))
+        # A method that cannot move the metric -- a monotone recalibration on
+        # AUROC -- has an identically zero effect in every replicate. Its SE is
+        # zero by construction, which no weighting scheme can use, so it is left
+        # to the caller's fallback.
+        if se > 0:
+            out[m] = se
+    return out
+
+
+def _collapse_by_target(data_metric: dict, transfers: list[str],
+                        prefix: str = "", metric: str = "") -> tuple[dict, list[str]]:
     """Average each method's effect over the transfers sharing a target center.
 
     With all thirty ordered pairs from six centers, every cohort is the target
@@ -222,6 +280,21 @@ def _collapse_by_target(data_metric: dict, transfers: list[str]) -> tuple[dict, 
     dependence is between fitted models rather than between measured outcomes,
     and is the smaller of the two.
     """
+    # Bootstrap standard errors first, when the replicate files are there.
+    boot_se: dict = {}
+    if prefix and metric:
+        by_target_src: dict = {}
+        for t in transfers:
+            by_target_src.setdefault(_target_of(t), []).append(t.split("_", 1)[0])
+        methods = sorted(data_metric)
+        for tgt, srcs in by_target_src.items():
+            se = _bootstrap_target_se(prefix, tgt, srcs, metric, methods)
+            if se:
+                boot_se[tgt] = se
+        if boot_se:
+            print(f"  [{metric}] errori standard per coorte dal bootstrap "
+                  f"congiunto: {len(boot_se)} coorti")
+
     out: dict = {}
     for m, per in data_metric.items():
         by_t: dict[str, list] = {}
@@ -231,8 +304,9 @@ def _collapse_by_target(data_metric: dict, transfers: list[str]) -> tuple[dict, 
         for tgt, vals in by_t.items():
             gs = np.array([v[0] for v in vals], dtype=float)
             ses = np.array([v[1] for v in vals], dtype=float)
-            coll[tgt] = (float(gs.mean()),
-                         float(np.sqrt(np.sum(ses ** 2)) / len(ses)))
+            se = boot_se.get(tgt, {}).get(
+                m, float(np.sqrt(np.sum(ses ** 2)) / len(ses)))
+            coll[tgt] = (float(gs.mean()), float(se))
         out[m] = coll
     targets = sorted({_target_of(t) for t in transfers})
     return out, targets
@@ -253,7 +327,8 @@ def run(prefix: str, clinical_margin: float, out_prefix: str | None,
     transfers, data = load_transfers(prefix, exclude=exclude)
     if by_target:
         for metric in ("auroc", "ece"):
-            data[metric], transfers_t = _collapse_by_target(data[metric], transfers)
+            data[metric], transfers_t = _collapse_by_target(
+                data[metric], transfers, prefix=prefix, metric=metric)
         transfers = transfers_t
         print(f"\n  COLLASSATO PER CENTRO TARGET: {len(transfers)} unita' "
               f"({', '.join(transfers)})")
