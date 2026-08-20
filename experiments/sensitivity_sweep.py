@@ -502,8 +502,12 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
     # fits, so their delta is identical whether or not --no_nets is used. That is
     # what makes it legitimate to run the calibration sweep without the nets and
     # read the discrimination verdicts from the run that had them.
-    acc_ece: dict[str, list[float]] = {k: [] for k in
-                                       ["erm", "prior_recalib", "platt_scaling"]}
+    _ece_keys = ["erm", "prior_recalib", "platt_scaling", "coral", "iw_erm"]
+    if n_src >= 2:
+        _ece_keys += ["irm", "group_dro"]
+    if with_nets:
+        _ece_keys += ["dann", "cdan"]
+    acc_ece: dict[str, list[float]] = {k: [] for k in _ece_keys}
     # Achieved, not requested: in the worlds mode the raw lambda0 was drawn, not
     # calibrated to a prevalence, so the realised minority fraction is the only
     # honest description of what the configuration actually was.
@@ -569,15 +573,30 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
                         "platt_scaling": fit_platt_scaling(src, tgt)}
                 vals_ece = {"erm": _res["erm"]["target"]["ece"],
                             **{k: v["target"]["ece"] for k, v in _cal.items()}}
+                # Keep the whole result, not just the AUROC. These fits already
+                # produce a target ECE and it was being discarded, which left the
+                # paper's calibration claims about the adversarial and
+                # domain-generalization methods resting on the single benchmark
+                # configuration while the discrimination claim was checked across
+                # the whole sampled space. Retaining it costs nothing: the fits
+                # are the same.
+                for _k in ("coral", "iw_erm"):
+                    vals_ece[_k] = _res[_k]["target"]["ece"]
                 if n_src >= 2:
                     from experiments.adaptation_methods import fit_irm
                     from experiments.group_dro import fit_group_dro
-                    vals["irm"] = fit_irm(src, tgt, seed=s)["target"]["auroc"]
-                    vals["group_dro"] = fit_group_dro(src, tgt, seed=s)["target"]["auroc"]
+                    _res["irm"] = fit_irm(src, tgt, seed=s)
+                    _res["group_dro"] = fit_group_dro(src, tgt, seed=s)
+                    for _k in ("irm", "group_dro"):
+                        vals[_k] = _res[_k]["target"]["auroc"]
+                        vals_ece[_k] = _res[_k]["target"]["ece"]
                 if with_nets:
                     from experiments.adaptation_methods import fit_dann, fit_cdan
-                    vals["dann"] = fit_dann(src, tgt, seed=s, use_iwcv=False)["target"]["auroc"]
-                    vals["cdan"] = fit_cdan(src, tgt, seed=s, use_iwcv=False)["target"]["auroc"]
+                    _res["dann"] = fit_dann(src, tgt, seed=s, use_iwcv=False)
+                    _res["cdan"] = fit_cdan(src, tgt, seed=s, use_iwcv=False)
+                    for _k in ("dann", "cdan"):
+                        vals[_k] = _res[_k]["target"]["auroc"]
+                        vals_ece[_k] = _res[_k]["target"]["ece"]
             except (ValueError, KeyError, np.linalg.LinAlgError) as exc:
                 n_skipped += 1
                 skip_reason = f"{type(exc).__name__}: {exc}"
@@ -631,6 +650,21 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
     # chosen so that positive means the recalibration REDUCED the error, i.e.
     # improved calibration, matching Delta_ECE in the paper.
     E = {k: np.asarray(v, dtype=float) for k, v in acc_ece.items()}
+    # One column trio per remaining method, computed here because _mci is local.
+    # Only prior adjustment carries a pre-specified direction; these are
+    # reported as effects, not verdicts.
+    _extra_ece: dict = {}
+    for _k in acc_ece:
+        if _k in ("erm", "prior_recalib", "platt_scaling"):
+            continue
+        if len(E.get("erm", ())) >= 1 and _k in E:
+            _m, _ci = _mci(E["erm"] - E[_k])
+        else:
+            _m = _ci = float("nan")
+        _extra_ece[f"d_{_k}_ece"] = round(_m, 4)
+        _extra_ece[f"d_{_k}_lo"] = round(_m - _ci, 4)
+        _extra_ece[f"d_{_k}_hi"] = round(_m + _ci, 4)
+
     if len(E["erm"]) >= 1:
         dp_m, dp_ci = _mci(E["erm"] - E["prior_recalib"])
         dl_m, dl_ci = _mci(E["erm"] - E["platt_scaling"])
@@ -656,9 +690,11 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
         "d_platt_ece": round(dl_m, 4),
         "d_platt_lo": round(dl_m - dl_ci, 4),
         "d_platt_hi": round(dl_m + dl_ci, 4),
+        **_extra_ece,
         "headroom": round(h_m, 4), "headroom_lo": round(h_m - h_ci, 4),
         "verdict": _verdict(g_m, g_ci, h_m),
     }
+
 
 
 def _verdict(gain: float, gain_ci: float, headroom: float) -> str:
