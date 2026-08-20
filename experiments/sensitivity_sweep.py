@@ -475,7 +475,8 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
     # --n flag stays as the centre of that axis.
     n = int(cfgv.get("n_per_domain", n))
     from experiments.baselines import (
-        fit_all_observed, fit_invariant_oracle, fit_observed_target_oracle)
+        fit_all_observed, fit_invariant_oracle, fit_observed_target_oracle,
+        fit_prior_recalib, fit_platt_scaling)
     from experiments.adaptation_methods import fit_coral, fit_iw_erm
 
     cfgv = dict(cfgv, _is_concept=(regime == "concept_shift"))
@@ -491,6 +492,18 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
         family += ["dann", "cdan"]
     acc: dict[str, list[float]] = {k: [] for k in
                                    ["erm", "latent_oracle", "obs_oracle"] + family}
+    # Calibration is tracked for ERM and the two post-hoc recalibrations only.
+    # The pre-specified directional prediction concerns prior adjustment, which
+    # is justified under label shift and is expected to degrade ECE elsewhere;
+    # Platt scaling assumes nothing about the shift and is carried as its
+    # mechanism-agnostic comparator, with no directional verdict attached.
+    #
+    # Both are rescalings of the ERM predictions and never touch the adversarial
+    # fits, so their delta is identical whether or not --no_nets is used. That is
+    # what makes it legitimate to run the calibration sweep without the nets and
+    # read the discrimination verdicts from the run that had them.
+    acc_ece: dict[str, list[float]] = {k: [] for k in
+                                       ["erm", "prior_recalib", "platt_scaling"]}
     # Achieved, not requested: in the worlds mode the raw lambda0 was drawn, not
     # calibrated to a prevalence, so the realised minority fraction is the only
     # honest description of what the configuration actually was.
@@ -541,13 +554,21 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
             # subsets of seeds.
             _y = np.asarray(tgt.y)
             try:
-                vals = {
-                    "erm":  fit_all_observed(src, tgt)["target"]["auroc"],
-                    "latent_oracle": fit_invariant_oracle(src, tgt)["target"]["auroc"],
-                    "obs_oracle": fit_observed_target_oracle(src, tgt, seed=s)["target"]["auroc"],
-                    "coral": fit_coral(src, tgt, seed=s)["target"]["auroc"],
-                    "iw_erm": fit_iw_erm(src, tgt, seed=s)["target"]["auroc"],
+                _res = {
+                    "erm":  fit_all_observed(src, tgt),
+                    "latent_oracle": fit_invariant_oracle(src, tgt),
+                    "obs_oracle": fit_observed_target_oracle(src, tgt, seed=s),
+                    "coral": fit_coral(src, tgt, seed=s),
+                    "iw_erm": fit_iw_erm(src, tgt, seed=s),
                 }
+                vals = {k: v["target"]["auroc"] for k, v in _res.items()}
+                # Inside the same try: a seed on which any fit is numerically
+                # impossible is dropped whole, so the AUROC and ECE means never
+                # end up averaging different subsets of seeds.
+                _cal = {"prior_recalib": fit_prior_recalib(src, tgt),
+                        "platt_scaling": fit_platt_scaling(src, tgt)}
+                vals_ece = {"erm": _res["erm"]["target"]["ece"],
+                            **{k: v["target"]["ece"] for k, v in _cal.items()}}
                 if n_src >= 2:
                     from experiments.adaptation_methods import fit_irm
                     from experiments.group_dro import fit_group_dro
@@ -564,6 +585,8 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
             minority.append(float(min(_y.mean(), 1.0 - _y.mean())))
             for _k, _v in vals.items():
                 acc[_k].append(_v)
+            for _k, _v in vals_ece.items():
+                acc_ece[_k].append(_v)
     finally:
         if prev_env is None:
             os.environ.pop("SHIFT_SURV_CONFIG", None)
@@ -603,6 +626,17 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
 
     g_m, g_ci = _mci(gain)
     h_m, h_ci = _mci(headroom)
+
+    # Paired over seeds, same convention as the AUROC gain above. The sign is
+    # chosen so that positive means the recalibration REDUCED the error, i.e.
+    # improved calibration, matching Delta_ECE in the paper.
+    E = {k: np.asarray(v, dtype=float) for k, v in acc_ece.items()}
+    if len(E["erm"]) >= 1:
+        dp_m, dp_ci = _mci(E["erm"] - E["prior_recalib"])
+        dl_m, dl_ci = _mci(E["erm"] - E["platt_scaling"])
+        ece_erm = float(np.nanmean(E["erm"]))
+    else:
+        dp_m = dp_ci = dl_m = dl_ci = ece_erm = float("nan")
     return {
         "regime": regime, **_flat(cfgv),
         "n_seeds": len(A["erm"]), "n_seeds_skipped": n_skipped,
@@ -615,6 +649,13 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
         "adapt_gain": round(g_m, 4), "adapt_gain_ci95": round(g_ci, 4),
         "adapt_gain_lo": round(g_m - g_ci, 4),
         "adapt_gain_hi": round(g_m + g_ci, 4),
+        "ece_erm": round(ece_erm, 4),
+        "d_prior_ece": round(dp_m, 4),
+        "d_prior_lo": round(dp_m - dp_ci, 4),
+        "d_prior_hi": round(dp_m + dp_ci, 4),
+        "d_platt_ece": round(dl_m, 4),
+        "d_platt_lo": round(dl_m - dl_ci, 4),
+        "d_platt_hi": round(dl_m + dl_ci, 4),
         "headroom": round(h_m, 4), "headroom_lo": round(h_m - h_ci, 4),
         "verdict": _verdict(g_m, g_ci, h_m),
     }
@@ -826,7 +867,9 @@ def worlds(regimes, seeds, n, n_src, with_nets, n_worlds, seed0,
     return rows
 
 
-def confirm(csv_paths, seeds, n, n_src, with_nets, n_confirm) -> list[dict]:
+def confirm(csv_paths, seeds, n, n_src, with_nets, n_confirm,
+            min_erm_auroc: float | None = None,
+            only_breaks: bool = False) -> list[dict]:
     """Re-run the largest observed gains on seeds disjoint from the screening set.
 
     A sweep is a search for candidate counterexamples, not an estimate of the
@@ -839,10 +882,42 @@ def confirm(csv_paths, seeds, n, n_src, with_nets, n_confirm) -> list[dict]:
 
     Uninformative configurations are excluded from the ranking: their gain is
     near zero by construction, so they can neither produce nor confirm a break.
+
+    ``min_erm_auroc`` restricts the candidate pool to configurations whose
+    screening ERM reached that AUROC
+    ------------------------------------------------------------------------
+    Every break the sweep finds sits under severe concept shift, where ERM is
+    inverted -- it ranks patients backwards and lands below chance -- so the
+    confirmed gain is the distance between a model that is badly wrong and one
+    that is slightly less badly wrong. The question that leaves open is whether
+    any break survives among configurations where the deployed model was worth
+    deploying at all, and that is what this filter answers.
+
+    It selects which configurations are *carried into* confirmation. It does not
+    touch ``_verdict``: the decision rule stays exactly as pre-specified, the
+    unfiltered confirmation is still the headline, and this runs beside it as a
+    declared subgroup rather than in place of it. Amending the rule after seeing
+    which cells it flags would void the pre-specification, which is the only
+    reason the sensitivity claim carries any weight.
+
+    The filter reads the screening ERM, not the confirmation one, because it has
+    to be applied before the confirmation is run.
+
+    ``only_breaks`` restricts the pool to configurations the screening already
+    flagged
+    -------------------------------------------------------------------------
+    The default pool is every informative configuration, ranked by gain, because
+    a confirmation stage should be able to catch a real effect the screening
+    verdict happened to miss. Combined with ``min_erm_auroc`` that is the wrong
+    pool for one specific question -- "of the configurations that broke, do any
+    survive once the inverted ones are set aside?" -- which is about the breaks
+    themselves and not about the largest gains in a subgroup. Setting both
+    reproduces exactly that analysis.
     """
     import ast, csv as _csv
 
     pool: list[dict] = []
+    n_inverted = n_not_break = 0
     for path in csv_paths:
         with open(path) as fh:
             for r in _csv.DictReader(fh):
@@ -852,13 +927,40 @@ def confirm(csv_paths, seeds, n, n_src, with_nets, n_confirm) -> list[dict]:
                     r["_gain"] = float(r["adapt_gain"])
                 except (KeyError, ValueError):
                     continue
+                if only_breaks and r.get("verdict") not in ("BREAK", "candidate_break"):
+                    n_not_break += 1
+                    continue
+                if min_erm_auroc is not None:
+                    try:
+                        erm = float(r["erm_auroc"])
+                    except (KeyError, ValueError):
+                        continue
+                    if not (erm >= min_erm_auroc):
+                        n_inverted += 1
+                        continue
                 r["_src"] = Path(path).name
                 pool.append(r)
     if not pool:
-        raise SystemExit("nessuna configurazione confermabile nei CSV indicati")
+        # An empty pool is the answer, not a failure: with only_breaks and a
+        # non-inverted filter it means no break survived the filter at all, which
+        # is exactly what the analysis set out to measure. Say so rather than
+        # exiting with a message that reads like a misconfiguration.
+        detail = []
+        if only_breaks:
+            detail.append(f"{n_not_break} non erano break/candidate")
+        if min_erm_auroc is not None:
+            detail.append(f"{n_inverted} avevano ERM sotto {min_erm_auroc}")
+        raise SystemExit(
+            "nessuna configurazione da confermare"
+            + (f" ({', '.join(detail)})" if detail else " nei CSV indicati"))
 
     pool.sort(key=lambda r: -r["_gain"])
     top = pool[:n_confirm]
+    if only_breaks:
+        print(f"  solo break: {n_not_break} configurazioni non flaggate escluse")
+    if min_erm_auroc is not None:
+        print(f"  sottogruppo non invertito: erm_auroc >= {min_erm_auroc}; "
+              f"{n_inverted} configurazioni escluse, {len(pool)} restano candidabili")
     print(f"  conferma: {len(top)} configurazioni (su {len(pool)}) "
           f"su {len(seeds)} seed disgiunti {seeds[0]}-{seeds[-1]}\n")
 
@@ -931,6 +1033,7 @@ def report(rows: list[dict]) -> None:
 
     brk = [r for r in good if r["verdict"] in ("BREAK", "candidate_break")]
     if brk:
+        _report_break_levels(brk)
         print(f"\n  {len(brk)} DA RICONFERMARE SU SEED DISGIUNTI (BREAK o candidate_break):")
         for r in sorted(brk, key=lambda x: -x["adapt_gain"])[:20]:
             cfg = " ".join(f"{k}={r[k]}" for k in AXES)
@@ -938,6 +1041,50 @@ def report(rows: list[dict]) -> None:
                   f"  amp={r['amplitude']}  {cfg}")
     else:
         print("\n  Nessuna configurazione in cui la stima puntuale supera il margine.")
+
+
+# The margin is a rule about a *difference*. It says nothing about where the two
+# models being differenced actually sit, and under severe concept shift they sit
+# below chance: the source relationship is inverted, ERM ranks patients backwards,
+# and an adaptation method that makes it less backwards earns a gain above the
+# margin while remaining unusable. Those configurations are genuine breaks under
+# the pre-specified rule and are reported as such -- the rule is not amended after
+# seeing which cells it flags, which would void the pre-specification that makes
+# the sensitivity claim worth anything. What follows is the level the rule does
+# not look at, so the two can be read together.
+_CHANCE = 0.5
+
+
+def _report_break_levels(brk: list[dict]) -> None:
+    """Absolute AUROC of the winner in each break, alongside the gap that flagged it."""
+    def _f(r, k):
+        try:
+            return float(r[k])
+        except (KeyError, TypeError, ValueError):
+            return float("nan")
+
+    win = np.array([_f(r, "best_adapt_auroc") for r in brk])
+    erm = np.array([_f(r, "erm_auroc") for r in brk])
+    head = np.array([_f(r, "headroom") for r in brk])
+    gain = np.array([_f(r, "adapt_gain") for r in brk])
+
+    n_win_ok = int(np.nansum(win > _CHANCE))
+    n_erm_inv = int(np.nansum(erm < _CHANCE))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        ok = np.isfinite(gain) & np.isfinite(head) & (head > 0)
+        frac = float(np.median(gain[ok] / head[ok])) if ok.any() else float("nan")
+
+    print(f"\n  LIVELLO ASSOLUTO NEI {len(brk)} BREAK/candidate "
+          f"(la regola guarda il divario, non il livello):")
+    print(f"    vincitore sopra {_CHANCE} AUROC        {n_win_ok:>4} / {len(brk)}")
+    print(f"    ERM invertito (sotto {_CHANCE})        {n_erm_inv:>4} / {len(brk)}")
+    print(f"    AUROC vincitore, mediana        {np.nanmedian(win):>9.4f}")
+    print(f"    AUROC ERM, mediana              {np.nanmedian(erm):>9.4f}")
+    print(f"    quota di headroom recuperata    {frac:>9.4f}  (mediana)")
+    if n_win_ok == 0 and len(brk):
+        print(f"    -> in nessun break il vincitore raggiunge il caso: il divario e' "
+              f"reale sotto la regola fissata, il modello resta inutilizzabile.")
 
 
 if __name__ == "__main__":
@@ -948,6 +1095,16 @@ if __name__ == "__main__":
     ap.add_argument("--confirm_from", nargs="+", default=None, metavar="CSV",
                     help="CSV di screening da cui prendere i top-gain (modo confirm)")
     ap.add_argument("--n_confirm", type=int, default=None)
+    ap.add_argument("--confirm_min_erm", type=float, default=None, metavar="AUROC",
+                    help="modo confirm: limita i candidati alle configurazioni il cui "
+                         "ERM di screening raggiunge questa AUROC (usa 0.5 per il "
+                         "sottogruppo non invertito). Non tocca la regola _verdict; "
+                         "va lanciato ACCANTO alla conferma senza filtro, non al suo posto")
+    ap.add_argument("--confirm_only_breaks", action="store_true",
+                    help="modo confirm: limita i candidati alle configurazioni gia' "
+                         "flaggate BREAK/candidate_break dallo screening. Con "
+                         "--confirm_min_erm 0.5 risponde a 'dei break, quanti "
+                         "sopravvivono escludendo quelli con ERM invertito'")
     ap.add_argument("--regimes", nargs="+", default=REGIMES, choices=REGIMES)
     ap.add_argument("--n_seeds", type=int, default=10)
     ap.add_argument("--n", type=int, default=500)
@@ -980,6 +1137,9 @@ if __name__ == "__main__":
     seeds = list(range(args.n_seeds))
     if args.with_nets is None:
         args.with_nets = True
+    if args.mode != "confirm" and (args.confirm_min_erm is not None
+                                   or args.confirm_only_breaks):
+        ap.error("--confirm_min_erm e --confirm_only_breaks valgono solo con --mode confirm")
     print(f"\n  modalita' {args.mode}, {args.n_source_domains} sorgente/i, "
           f"famiglia {'con' if args.with_nets else 'senza'} DANN/CDAN")
     t0 = time.time()
@@ -991,7 +1151,9 @@ if __name__ == "__main__":
             raise SystemExit("nessun CSV di screening trovato; passa --confirm_from")
         rows = confirm(srcs, PROTOCOL["confirmation_seeds"], args.n,
                        args.n_source_domains, args.with_nets,
-                       args.n_confirm or PROTOCOL["n_confirm"])
+                       args.n_confirm or PROTOCOL["n_confirm"],
+                       min_erm_auroc=args.confirm_min_erm,
+                       only_breaks=args.confirm_only_breaks)
     elif args.mode == "oat":
         rows = oat(args.regimes, seeds, args.n, args.n_source_domains,
                    args.with_nets, axes=args.axes)
@@ -1002,7 +1164,12 @@ if __name__ == "__main__":
                       world_slice=(_k, _n))
     report(rows)
 
+    # The filtered confirmation is an additional analysis, so it gets its own file:
+    # writing it over sensitivity_confirm_<k>src.csv would replace the headline
+    # result with the subgroup and leave no trace that the filter was applied.
     prefix = args.out_prefix or f"sensitivity_{args.mode}_{args.n_source_domains}src"
+    if args.confirm_min_erm is not None and not args.out_prefix:
+        prefix += "_noninverted"
     _TABLES.mkdir(parents=True, exist_ok=True)
     save_table_csv(rows, _TABLES / f"{prefix}.csv")
     print(f"\n  {time.time()-t0:.0f}s   Saved: {_TABLES}/{prefix}.csv")

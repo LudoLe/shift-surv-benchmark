@@ -313,3 +313,53 @@ protocol:
     - {verdict: candidate_break, test: "gain point estimate > margin"}
     - {verdict: inconclusive,    test: "gain 95% upper limit >= margin"}
     - {verdict: supported,       test: "otherwise"}
+
+# ---------------------------------------------------------------------------
+# Calibration: pre-specified directional analysis
+# ---------------------------------------------------------------------------
+# Declared before the calibration sweep was run. The discrimination analysis
+# above tests an ABSENCE of effect against a practical margin; this one tests a
+# PREDICTED SIGN, because that is the shape of the calibration claim: prior
+# adjustment is justified only under label shift, so it should recover ECE where
+# the label-prior mechanism acts alone and degrade it everywhere else.
+#
+# There is deliberately no ECE margin. No clinically meaningful ECE difference
+# is pre-specified anywhere in this work, and importing the 0.02 AUROC margin
+# would give it a meaning it does not have.
+calibration:
+  # Sign of Delta_ECE = ECE(ERM) - ECE(method); positive means the correction
+  # reduced the error.
+  expected_sign_prior_adjustment:
+    prior_shift:            positive
+    covariate_shift:        negative
+    observational_shift:    negative
+    spurious_shift:         negative
+    baseline_hazard_shift:  negative
+    concept_shift:          negative
+
+  # Platt scaling assumes nothing about the shift mechanism, so no sign is
+  # predicted for it. Reported descriptively as a comparator.
+  expected_sign_platt: none
+
+  decision_rule_precedence:
+    - {verdict: uninformative,            test: "regime not in resolvable_regimes"}
+    - {verdict: directionally_consistent, test: "95% CI excludes zero in the predicted direction"}
+    - {verdict: directionally_inconsistent, test: "95% CI excludes zero in the opposite direction"}
+    - {verdict: inconclusive,             test: "otherwise"}
+
+  # A regime can inform the directional test only where the predicted effect is
+  # large relative to seed-level noise. Taken from benchmark_1s1t_full at the
+  # default configuration (10 seeds), frozen before the sweep: a regime is
+  # resolvable when |expected delta| > 1.96 * paired SE there. This is a
+  # precision criterion, not a practical threshold.
+  expected_effect_at_default:      # delta, paired SE over 10 seeds
+    prior_shift:            {delta: +0.1287, se: 0.0128, resolvable: true}
+    covariate_shift:        {delta: -0.1155, se: 0.0333, resolvable: true}
+    observational_shift:    {delta: -0.1174, se: 0.0337, resolvable: true}
+    spurious_shift:         {delta: -0.0165, se: 0.0070, resolvable: true}
+    concept_shift:          {delta: -0.0058, se: 0.0031, resolvable: false}
+    baseline_hazard_shift:  {delta: -0.0082, se: 0.0130, resolvable: false}
+
+  # Apparent directional findings are re-run on these, as for the AUROC breaks.
+  confirmation_seeds: [100, 101, 102, 103, 104, 105, 106, 107, 108, 109,
+                       110, 111, 112, 113, 114, 115, 116, 117, 118, 119]
