@@ -79,11 +79,12 @@ echo "=== archiviate $moved tabelle in $ARCHIVE"
 # _gen_fig3_ece_bars.py, _gen_table_survival.py). Running under the default
 # prefix produces correct numbers in files no figure generator opens, and the
 # mismatch only surfaces when the figures are regenerated.
-# prior_shift is in APPENDIX_SCENARIOS, not CORE_SCENARIOS, so the main
-# benchmark does not produce it -- yet the paper reports label-prior as one of
-# the six core regimes and fig_disc/fig_cal both show it. It therefore needs a
-# dedicated job per setting, rather than being picked up incidentally from
-# whichever --include_appendix run happened to cover it.
+# prior_shift is now in CORE_SCENARIOS, so the main benchmark emits it and the
+# dedicated *_prior jobs below are redundant for any table produced from here on.
+# They stay until the next full re-run: the tables currently on disk came from the
+# old split, and _gen_fig_disc.py / _gen_fig_cal.py still read label-prior from
+# those prefixes. Drop the four *_prior jobs, and the PRIOR_PREFIX map in the two
+# figure generators, once the main prefixes carry prior_shift rows.
 jobs_list=(
   "benchmark_1s1t_iwcv|"
   "benchmark_1s1t_prior|--scenarios prior_shift"

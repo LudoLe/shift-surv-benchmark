@@ -1,0 +1,89 @@
+% =====================================================================
+% SHIFT-SURV — riscrittura §V-B-1 (I3LUNG)
+% 2026-08-19
+%
+% Sostituisce tutto da "\subsubsection{I3LUNG}" fino a (esclusa)
+% "\subsubsection{Public breast-cancer registry}".
+%
+% Numeri verificati contro outputs/tables/i3lung_meta.csv e
+% i3lung_loco_meta.csv il 2026-08-19.
+% UNICO da controllare: il totale pazienti (vedi nota [N] sotto).
+% =====================================================================
+
+\subsubsection{I3LUNG}
+\label{sec:I3LUNG}
+
+I3LUNG comprises six centers and $2074$ patients, with center sizes ranging
+from $191$ to $668$.% [N] il draft dice 2075; 1972 + 102 esclusi = 2074.
+Each patient is described by $11$ routinely available clinical variables
+selected by the treating physicians, who also chose $6$-month overall survival
+as the endpoint for identifying short survivors. The fixed-horizon analysis
+includes the $1972$ patients whose status at that horizon is known.
+
+\textbf{Center-level heterogeneity.}
+The centers differ both in covariate distribution and in event rate. We
+quantify the first with pairwise RBF-MMD, the maximum mean discrepancy under a
+Gaussian radial-basis-function kernel, where larger values indicate more
+dissimilar marginal covariate distributions~\cite{gretton2012kernel}; across the
+$15$ center pairs it ranges from $0.001$ to $0.160$. The $6$-month event rate
+ranges from $0.16$ to $0.42$ ($\chi^2$, $p<10^{-3}$), the range the synthetic
+configuration was set to reproduce (Section~\ref{sec:setup}).
+
+These are the only two mechanisms that unlabeled data can identify, and they are
+descriptive: they establish that the centers differ, not that covariate or
+label-prior shift operates in isolation. The remaining four mechanisms leave no
+signature computable without target labels. Neither reference model is available
+here either---the latent factors are not observed, and an observed-data oracle
+would require exactly the target labels that deployment withholds. The real
+cohorts can therefore establish whether transport fails, but not how much of the
+failure was recoverable. Supplying that decomposition is the role of the
+controlled benchmark.
+
+\textbf{Protocol.}
+We evaluate the two protocols of Section~\ref{sec:setup}: adaptation over all
+$30$ ordered source--target pairs, and domain generalization holding out each
+center in turn with the other five pooled. Recalibration is applied after
+fitting and changes only the predicted probabilities; target outcomes are used
+only for evaluation. Figure~\ref{fig:realmain} reports discrimination as
+$\Delta_{\mathrm{AUROC}}=\mathrm{AUROC}_{\mathrm{method}}-\mathrm{AUROC}_{\mathrm{ERM}}$
+and calibration as
+$\Delta_{\mathrm{ECE}}=\mathrm{ECE}_{\mathrm{ERM}}-\mathrm{ECE}_{\mathrm{method}}$,
+so that positive values favor the method in both panels. For adaptation we
+average the five incoming transfers within each target center, giving six
+estimates whose standard errors come from the joint patient-level bootstrap;
+domain generalization gives one estimate per held-out center. The six estimates
+are pooled per protocol, method, and endpoint with a DerSimonian--Laird
+random-effects model.
+
+\textbf{Discrimination is not recovered.}
+No method produces a practically relevant improvement on either protocol. Under
+adaptation, DANN, CDAN, and IW-ERM pool \emph{below} ERM ($-0.034$, $-0.028$,
+and $-0.012$ AUROC), while CORAL is indistinguishable from it ($-0.000$, $95\%$
+CI $[-0.005,+0.005]$). Even the optimistic summary that selects the best method
+separately for each target center has an upper $95\%$ confidence limit of
+$+0.0055$, roughly a quarter of the pre-specified $0.02$ margin. Under domain
+generalization, IRM and GroupDRO change AUROC by $+0.002$ and $+0.000$ with
+intervals covering zero. The best-per-fold summary does reach nominal
+significance here ($+0.0072$, $95\%$ CI $[+0.0006,+0.0139]$, $p=0.033$), but it
+is an optimistic selection made on target performance and remains below a third
+of the margin; we read it as statistically detectable and not clinically
+relevant.
+
+\textbf{Calibration fails in the direction the benchmark predicts.}
+Calibration behaves differently, and the difference is mechanism-specific rather
+than a matter of degree. Platt scaling improves pooled ECE by $0.018$ ($95\%$ CI
+$[+0.007,+0.028]$, $p=0.001$), the only consistent gain of any method on either
+endpoint. Prior adjustment moves in the opposite direction, worsening pooled ECE
+by $0.074$ with extreme heterogeneity ($I^2=91\%$): it degrades calibration in
+five of the six target centers, by as much as $0.16$ ECE, and improves it in
+one. This is precisely the behaviour the controlled benchmark attributes to a
+violated assumption. Prior adjustment recovers calibration when prevalence is
+the only quantity that moves, and harms it under every other mechanism
+(Fig.~\ref{fig:cal}). The I3LUNG centers differ in covariates as well as in
+event rate, so the label-shift assumption does not hold and the method fails in
+the anticipated direction. What the synthetic experiment identifies as an
+assumption violation is observable, untreated, in a real consortium cohort.
+
+Both patterns reproduce the synthetic result: discrimination is not recovered by
+any method, while calibration changes depend on whether a method's assumption is
+satisfied rather than on how much shift is present.

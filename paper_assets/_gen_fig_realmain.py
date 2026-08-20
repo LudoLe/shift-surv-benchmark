@@ -14,6 +14,18 @@ in both panels. Individual-unit points are recomputed from the per-transfer
 summaries and are shown faintly; they are the reason the figure exists, since a
 pooled interval cannot show how much the effect varies across cohorts.
 
+Three encoding decisions are load-bearing.
+
+Recalibration in the AUROC panel. Platt scaling and prior adjustment are
+monotone increasing maps, so ΔAUROC is identically zero, not a measured null. A
+filled marker would claim an estimate that was never made; a blank row reads as
+missing data. The rows carry a hollow grey diamond at zero plus a footnote,
+which is the standard "present, but not of the same kind" convention.
+
+The registry gets no pooled diamond. Two directed transfers cannot support an
+interval that a reader would compare against the six-unit intervals above it, so
+the block shows the two points and the range between them, marked as such.
+
 One deliberate restriction. i3lung_loco_meta.csv also contains the adaptation
 methods and prior adjustment, which the leave-one-centre-out runs happen to
 compute. They are not drawn in that block: the generalization protocol does not
@@ -50,6 +62,12 @@ _apply_style()
 
 ERM = "lr_erm"
 C_ADAPT, C_GENER, C_RECAL = "#D95F0E", "#1B9E77", "#E6B422"
+C_LABEL = {C_ADAPT: "#9E440A", C_GENER: "#0F6E56", C_RECAL: "#8A6A0C"}
+BAND, GRID, ZERO, GREY = "#F7F7F5", "#E8E8E4", "#3A3A3A", "#8C8C8C"
+# Block headings and footnotes start at the left margin of the whole figure,
+# not at the left edge of the plotting area: starting them where the data
+# begins pushed them into the zero line.
+LEFT_EDGE = 0.035
 MARGIN = 0.02
 
 NAME = {"iw_erm": "IW-ERM", "coral": "CORAL", "dann": "DANN", "cdan": "CDAN",
@@ -59,18 +77,24 @@ FAMILY = {"iw_erm": C_ADAPT, "coral": C_ADAPT, "dann": C_ADAPT, "cdan": C_ADAPT,
           "irm": C_GENER, "group_dro": C_GENER,
           "prior_recalib": C_RECAL, "platt_scaling": C_RECAL}
 
-# (meta prefix, heading, unit of analysis, methods drawn)
+# (meta prefix, heading, unit of analysis, methods drawn, pooled)
+# pooled=False draws the individual units and their range instead of an
+# estimate and interval; see the module docstring.
 SETTINGS = [
-    ("i3lung_meta", "I3LUNG adaptation",
-     "30 transfers, 6 target cohorts",
-     ["iw_erm", "coral", "dann", "cdan", "prior_recalib", "platt_scaling"]),
-    ("i3lung_loco_meta", "I3LUNG domain generalization",
+    ("i3lung_meta", "I3LUNG Adaptation",
+     "6 target cohorts, 30 directed transfers",
+     ["iw_erm", "coral", "dann", "cdan", "prior_recalib", "platt_scaling"],
+     True),
+    ("i3lung_loco_meta", "I3LUNG Domain Generalization",
      "6 held-out centres",
-     ["irm", "group_dro", "platt_scaling"]),
-    ("public_rotterdam_gbsg_meta", "Registry adaptation",
+     ["irm", "group_dro", "platt_scaling"],
+     True),
+    ("public_rotterdam_gbsg_meta", "Registry Adaptation",
      "2 directed transfers",
-     ["iw_erm", "coral", "dann", "cdan", "prior_recalib", "platt_scaling"]),
+     ["iw_erm", "coral", "dann", "cdan", "prior_recalib", "platt_scaling"],
+     False),
 ]
+
 
 
 def load_meta(tables: str, prefix: str) -> dict:
@@ -153,37 +177,80 @@ def units(tables: str) -> dict:
 def layout():
     """Row positions, top to bottom, with a gap between settings."""
     y, rows, bands = 0.0, [], []
-    for prefix, head, unit, methods in SETTINGS:
+    for prefix, head, unit, methods, pooled in SETTINGS:
         top = y
         for m in methods:
-            rows.append((y, prefix, m))
+            rows.append((y, prefix, m, pooled))
             y += 1.0
         bands.append((top - 0.5, y - 0.5, head, unit))
-        y += 1.5
-    total = y - 1.5
-    return [(total - yy, p, m) for yy, p, m in rows], \
+        y += 1.7
+    total = y - 1.7
+    return [(total - yy, p, m, k) for yy, p, m, k in rows], \
            [(total - b, total - a, h, u) for a, b, h, u in bands], total
 
 
-def draw(ax, metric, meta, per_unit, rows, bands, total, xlabel, show_margin):
-    for i, (lo, hi, _h, _u) in enumerate(bands):
-        if i % 2 == 0:
-            ax.axhspan(lo, hi, color="#F6F6F6", zorder=0, lw=0)
-    if show_margin:
-        ax.axvline(MARGIN, color="#B9B9B9", lw=0.9, ls=(0, (4, 3)), zorder=1)
-    ax.axvline(0.0, color="#3A3A3A", lw=1.0, zorder=2)
-
-    for y, prefix, m in rows:
-        # Recalibration is a monotone increasing map, so it cannot change the
-        # ranking and is not part of the AUROC comparison. Its rows stay blank
-        # in that panel rather than showing a point pinned to zero, which would
-        # read as a measured null instead of an identity.
-        if metric == "auroc" and FAMILY[m] == C_RECAL:
+def xrange_for(metric, meta, per_unit, rows, is_auroc):
+    """Data limits plus padding, with room kept for the practical margin."""
+    vals = []
+    for _y, prefix, m, pooled in rows:
+        if is_auroc and FAMILY[m] == C_RECAL:
             continue
+        vals += list(per_unit.get((prefix, metric, m), []))
+        e = meta.get(prefix, {}).get((metric, m))
+        if e and pooled:
+            vals += [e[1], e[2]]
+    if not vals:
+        return -0.05, 0.05
+    lo, hi = min(vals), max(vals)
+    if is_auroc:
+        hi = max(hi, MARGIN + 0.004)
+    pad = 0.06 * (hi - lo)
+    return lo - pad, hi + pad
+
+
+def draw(ax, metric, meta, per_unit, rows, bands, total, xlabel, is_auroc):
+    lo_x, hi_x = xrange_for(metric, meta, per_unit, rows, is_auroc)
+    ax.set_xlim(lo_x, hi_x)
+    ax.set_axisbelow(True)
+
+    # Every setting gets the same band. Alternating them is only legible with
+    # many blocks; with three it reads as one block having been forgotten.
+    for lo, hi, _h, _u in bands:
+        ax.axhspan(lo, hi, color=BAND, zorder=0, lw=0)
+    ax.grid(axis="x", color=GRID, lw=0.5, zorder=1)
+
+    if is_auroc:
+        # Neutral grey, not a family colour: shading the practically-relevant
+        # zone in the green used for domain generalization reads as if the zone
+        # belonged to that family.
+        ax.axvspan(MARGIN, hi_x, color="#9AA0A6", alpha=0.07, zorder=1, lw=0)
+        ax.axvline(MARGIN, color="#B9B9B9", lw=0.9, ls=(0, (4, 3)), zorder=2)
+    ax.axvline(0.0, color=ZERO, lw=1.0, zorder=3)
+
+    for y, prefix, m, pooled in rows:
         col = FAMILY[m]
+
+        if is_auroc and col == C_RECAL:
+            ax.plot([0.0], [y], marker="D", ms=4.6, mfc="none", mec=GREY,
+                    mew=0.9, zorder=5)
+            continue
+
         pts = per_unit.get((prefix, metric, m), [])
+
+        if not pooled:
+            # Individual transfers are the estimate here, so they are drawn at
+            # full weight and joined by their observed range.
+            if len(pts) >= 2:
+                ax.plot([min(pts), max(pts)], [y, y], color=col, lw=0.9,
+                        ls=(0, (2, 2)), zorder=4)
+            if pts:
+                ax.plot(pts, [y] * len(pts), marker="o", ls="none", ms=4.0,
+                        color=col, mec="white", mew=0.6, zorder=5)
+            continue
+
+        # Units sit just below the pooled row so the two do not collide.
         if pts:
-            ax.scatter(pts, [y] * len(pts), s=13, color=col, alpha=0.30,
+            ax.scatter(pts, [y - 0.24] * len(pts), s=11, color=col, alpha=0.32,
                        edgecolors="none", zorder=3)
         e = meta.get(prefix, {}).get((metric, m))
         if e:
@@ -193,11 +260,10 @@ def draw(ax, metric, meta, per_unit, rows, bands, total, xlabel, show_margin):
             ax.plot([est], [y], marker="D", ms=5.2, color=col, mec="white",
                     mew=0.7, zorder=5)
 
-    ax.set_yticks([y for y, _p, _m in rows])
-    ax.set_yticklabels([NAME[m] for _y, _p, m in rows])
+    ax.set_yticks([y for y, _p, _m, _k in rows])
+    ax.set_yticklabels([NAME[m] for _y, _p, m, _k in rows])
     ax.set_ylim(-0.9, total + 2.1)
     ax.set_xlabel(xlabel)
-    ax.grid(False)
     for sp in ("top", "right", "left"):
         ax.spines[sp].set_visible(False)
     ax.tick_params(axis="y", length=0)
@@ -209,21 +275,27 @@ def main() -> None:
     ap.add_argument("--outdir", default=OUTDIR)
     args = ap.parse_args()
 
-    meta = {p: load_meta(args.tables, p) for p, _h, _u, _m in SETTINGS}
+    meta = {p: load_meta(args.tables, p) for p, _h, _u, _m, _k in SETTINGS}
     per_unit = units(args.tables)
     rows, bands, total = layout()
 
-    fig, axes = plt.subplots(1, 2, figsize=(7.16, 4.9), sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(7.16, 3.9), sharey=True)
     draw(axes[0], "auroc", meta, per_unit, rows, bands, total,
-         r"$\Delta$AUROC   (method $-$ ERM)", True)
+         r"$\Delta$ AUROC", True)
     draw(axes[1], "ece", meta, per_unit, rows, bands, total,
-         r"$\Delta$ECE   (ERM $-$ method)", False)
+         r"$\Delta$ ECE", False)
 
-    # Setting headings sit above their block on the left panel only, so the row
-    # labels are not repeated and nothing needs a legend.
+    for lbl in axes[1].get_yticklabels():
+        lbl.set_visible(False)
+
+    # The family is carried by the row label itself, which removes the legend:
+    # a key would only repeat what the rows already encode.
+    for lbl, (_y, _p, m, _k) in zip(axes[0].get_yticklabels(), rows):
+        lbl.set_color(C_LABEL[FAMILY[m]])
+
     # subplots_adjust first: the heading positions are computed from the axes
     # transform, which is only final once the layout is.
-    fig.subplots_adjust(left=0.185, right=0.99, top=0.985, bottom=0.115,
+    fig.subplots_adjust(left=0.185, right=0.99, top=0.945, bottom=0.125,
                         wspace=0.07)
 
     # Drawn on the figure, not the left axes: the right panel has an opaque
@@ -231,19 +303,25 @@ def main() -> None:
     for lo, hi, head, unit in bands:
         yfig = fig.transFigure.inverted().transform(
             axes[0].transData.transform((0, hi + 0.35)))[1]
-        fig.text(0.185, yfig + 0.012, head, ha="left", va="baseline",
+        fig.text(LEFT_EDGE, yfig + 0.015, head, ha="left", va="baseline",
                  fontsize=7.8, fontweight="bold", color="#2E2E2E")
-        fig.text(0.185, yfig - 0.004, unit, ha="left", va="baseline",
-                 fontsize=6.9, color="#777777")
+
+    for ax, title in ((axes[0], "Discrimination"), (axes[1], "Calibration")):
+        x0 = ax.get_position().x0
+        fig.text(0.5 * (x0 + ax.get_position().x1), 0.965, title,
+                 ha="center", va="baseline", fontsize=9.0,
+                 fontweight="bold", color="#2E2E2E")
+
 
     os.makedirs(args.outdir, exist_ok=True)
     for ext, kw in (("pdf", {}), ("png", {"dpi": 300})):
         fig.savefig(os.path.join(args.outdir, f"fig_realmain.{ext}"), **kw)
     plt.close(fig)
     print(f"  scritto {args.outdir}/fig_realmain.{{pdf,png}}")
-    for p, h, u, ms in SETTINGS:
+    for p, h, u, ms, pooled in SETTINGS:
         k = next((v[3] for v in meta[p].values()), None)
-        print(f"    {h:<32}k={k}  ({u})")
+        tag = f"k={k}" if pooled else "unpooled"
+        print(f"    {h:<32}{tag:<12}({u})")
 
 
 if __name__ == "__main__":

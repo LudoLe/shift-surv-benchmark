@@ -21,8 +21,9 @@ Methods
 Scenarios
 ---------
   Core    : no_shift, covariate_shift, observational_shift, spurious_shift,
-            baseline_hazard_shift, concept_shift, shape_shift
-  Appendix: strong_covariate_shift, cure_shift  (add --include_appendix)
+            baseline_hazard_shift, prior_shift, concept_shift, shape_shift
+  Appendix: strong_covariate_shift, cure_shift, censoring_shift
+            (add --include_appendix)
 
 Usage
 -----
@@ -81,17 +82,26 @@ from utils.io import save_table_csv
 
 _TABLES = _ROOT / "outputs" / "tables"
 
+# Listed in the order the paper names the six regimes, followed by shape_shift.
+# prior_shift belongs here and not in the appendix: the paper reports label-prior
+# as one of the six core mechanisms, fig_disc and fig_cal both show it, and it is
+# the only regime in which calibration is recoverable at all. Leaving it in
+# APPENDIX_SCENARIOS meant the main benchmark did not emit it, which is why
+# run_all_synthetic.sh carries dedicated *_prior jobs and _gen_fig_disc.py carries
+# a PRIOR_PREFIX map -- scaffolding that exists only to reach a regime the default
+# run should have produced. Those stay for now because the tables already on disk
+# were produced under the old split; they become redundant after the next full run.
 CORE_SCENARIOS = [
     "no_shift",
     "covariate_shift",
     "observational_shift",
     "spurious_shift",
     "baseline_hazard_shift",
+    "prior_shift",
     "concept_shift",
     "shape_shift",
 ]
 APPENDIX_SCENARIOS = [
-    "prior_shift",
     "strong_covariate_shift",
     "cure_shift",
     "censoring_shift",
