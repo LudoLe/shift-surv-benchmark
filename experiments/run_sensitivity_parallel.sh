@@ -17,6 +17,11 @@
 #   JOBS     concurrent processes (default: a quarter of the cores)
 #   N_SEEDS  seeds per configuration (default: 10)
 #
+# TAG=_ece ./experiments/run_sensitivity_parallel.sh 24 10
+#   writes to sensitivity_ece_* instead of sensitivity_*, so a re-run that adds
+#   a metric does not overwrite the screening the paper already reports. Empty
+#   by default, which reproduces the original names exactly.
+#
 # On a shared machine, read the load before choosing JOBS. Every job is one
 # thread after the TensorFlow settings below, so JOBS is very nearly the number
 # of cores this run will occupy. The jobs are also niced, so they yield to
@@ -34,6 +39,8 @@ cd "$ROOT"
 NCORES="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 JOBS="${1:-$(( NCORES / 4 ))}"
 N_SEEDS="${2:-10}"
+# Suffix on every output name. Empty by default.
+TAG="${TAG:-}"
 (( JOBS < 1 )) && JOBS=1
 
 # Leave room for whoever else is on the machine. The one-minute load average is
@@ -181,7 +188,7 @@ echo
 pids=(); names=()
 for job in "${jobs_list[@]}"; do
   IFS='|' read -r mode nsrc reg extra sfx <<< "$job"
-  name="sens_${mode}_${nsrc}src_${reg}${sfx:+_$sfx}"
+  name="sens${TAG}_${mode}_${nsrc}src_${reg}${sfx:+_$sfx}"
   while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n 2>/dev/null || sleep 5; done
   echo "  [$(date +%T)] start  $name"
   # shellcheck disable=SC2086
@@ -213,12 +220,12 @@ echo "=== $(date +%F\ %T) — screening finito"
 # worse than one that is missing.
 for unit in "${UNITS[@]}"; do
   IFS='|' read -r mode nsrc extra <<< "$unit"
-  out="outputs/tables/sensitivity_${mode}_${nsrc}src.csv"
+  out="outputs/tables/sensitivity${TAG}_${mode}_${nsrc}src.csv"
   shards=()
   for reg in "${REGIMES[@]}"; do
-    for f in outputs/tables/sens_${mode}_${nsrc}src_${reg}.csv \
-             outputs/tables/sens_${mode}_${nsrc}src_${reg}_w*.csv \
-             outputs/tables/sens_${mode}_${nsrc}src_${reg}_ax*.csv; do
+    for f in outputs/tables/sens${TAG}_${mode}_${nsrc}src_${reg}.csv \
+             outputs/tables/sens${TAG}_${mode}_${nsrc}src_${reg}_w*.csv \
+             outputs/tables/sens${TAG}_${mode}_${nsrc}src_${reg}_ax*.csv; do
       [ -s "$f" ] && shards+=("$f")
     done
   done
@@ -237,11 +244,11 @@ echo "=== $(date +%F\ %T) — conferma dei candidati"
 for nsrc in 1 3; do
   srcs=()
   for mode in oat worlds; do
-    f="outputs/tables/sensitivity_${mode}_${nsrc}src.csv"
+    f="outputs/tables/sensitivity${TAG}_${mode}_${nsrc}src.csv"
     [ -s "$f" ] && srcs+=("$f")
   done
   if [ ${#srcs[@]} -eq 0 ]; then echo "  nessun CSV di screening per ${nsrc} sorgente/i"; continue; fi
-  name="sens_confirm_${nsrc}src"
+  name="sens${TAG}_confirm_${nsrc}src"
   echo "  [$(date +%T)] start  $name  (da ${srcs[*]})"
   taskset_pfx=(); command -v taskset >/dev/null 2>&1 && taskset_pfx=(taskset -c 0-$(( NCORES/4 )))
   "${taskset_pfx[@]}" nice -n "$NICE" python -m experiments.sensitivity_sweep --mode confirm \
