@@ -191,6 +191,72 @@ def pool_best_per_transfer(data_metric: dict, methods: list[str], transfers: lis
     return r
 
 
+def _source_of(name: str) -> str:
+    """The source center of a transfer name like ``INT_GHD``."""
+    return name.split("_", 1)[0]
+
+
+def subgroup_by_source(data_metric: dict, methods: list[str],
+                       transfers: list[str], min_k: int = 2) -> list[dict]:
+    """Estimate each method's effect within each source center and test whether
+    the six estimates are compatible with a single common effect.
+
+    Why this exists
+    ---------------
+    The synthetic half of the benchmark reports one effect per shift regime,
+    because a method that corrects a prior shift and a method that corrects a
+    measurement shift are answering different questions and averaging them
+    describes neither. Real centers differ by unknown mixtures of the same
+    mechanisms, so the pooled figure across thirty transfers carries the same
+    problem in a form we cannot see. Grouping by source center is the closest
+    available analogue: it asks whether the effect of a method depends on where
+    the model was trained.
+
+    Why the heterogeneity statistic already reported does not answer it
+    ------------------------------------------------------------------
+    I-squared measures dispersion against the within-transfer sampling error and
+    looks for no particular structure. With per-transfer standard errors near
+    0.025 it has little power, and it returns zero for CDAN on calibration even
+    though the five transfers out of SZMC all improve by roughly 0.05 while
+    those out of GHD all worsen. The Q statistic between subgroups tests that
+    specific alternative and finds it.
+
+    Returned p-values are unadjusted and the subgroups hold five transfers each,
+    so this is a description of where an effect lives and not a confirmatory
+    test.
+    """
+    rows = []
+    for m in methods:
+        per = data_metric.get(m, {})
+        groups: dict[str, list[str]] = {}
+        for t in transfers:
+            if t in per:
+                groups.setdefault(_source_of(t), []).append(t)
+        groups = {g: ts for g, ts in groups.items() if len(ts) >= min_k}
+        if len(groups) < 2:
+            continue
+        sub = {}
+        for g, ts in sorted(groups.items()):
+            ys  = np.array([per[t][0] for t in ts], dtype=float)
+            ses = np.array([per[t][1] for t in ts], dtype=float)
+            sub[g] = dersimonian_laird(ys, ses)
+
+        # Test of subgroup differences: the subgroup estimates are combined under
+        # a common effect and Q measures how far they sit from it. Weights are
+        # inverse-variance on the subgroup estimates themselves, so each center
+        # enters once regardless of how many transfers it contributed.
+        est = np.array([sub[g]["estimate"] for g in sub], dtype=float)
+        se  = np.array([sub[g]["se"] for g in sub], dtype=float)
+        w   = 1.0 / np.clip(se ** 2, 1e-12, None)
+        mu  = float(np.sum(w * est) / np.sum(w))
+        Qb  = float(np.sum(w * (est - mu) ** 2))
+        df  = len(sub) - 1
+        rows.append({"method": m, "subgroups": sub, "common": mu,
+                     "Q_between": Qb, "df": df,
+                     "p_between": float(sp_stats.chi2.sf(Qb, df))})
+    return rows
+
+
 # ---------------------------------------------------------------------------
 # Reporting
 # ---------------------------------------------------------------------------
@@ -323,8 +389,12 @@ def _design_of(name: str) -> str:
 
 
 def run(prefix: str, clinical_margin: float, out_prefix: str | None,
-        exclude: list[str] | None = None, by_target: bool = False) -> None:
+        exclude: list[str] | None = None, by_target: bool = False,
+        by_source: bool = False) -> None:
     transfers, data = load_transfers(prefix, exclude=exclude)
+    if by_target and by_source:
+        raise SystemExit("--by_target collassa le sorgenti, quindi non si combina "
+                         "con --by_source")
     if by_target:
         for metric in ("auroc", "ece"):
             data[metric], transfers_t = _collapse_by_target(
@@ -384,6 +454,30 @@ def run(prefix: str, clinical_margin: float, out_prefix: str | None,
                   f"{best['ci_hi']:+.4f}; a {clinical_margin:+.3f} gain is "
                   f"{'RULED OUT' if rules_out else 'NOT ruled out'}.")
 
+        if by_source:
+            subs = subgroup_by_source(data[metric], methods, transfers)
+            if subs:
+                print(f"\n  [{arrow}]  effect within each SOURCE center, and test of"
+                      f" subgroup differences")
+                for r in subs:
+                    star = " <-- depends on the source center" if r["p_between"] < 0.05 else ""
+                    print(f"\n    {r['method']}   Q({r['df']})={r['Q_between']:.1f}, "
+                          f"p={r['p_between']:.4f}{star}")
+                    for g, sr in r["subgroups"].items():
+                        mark = "*" if sr["ci_lo"] > 0 or sr["ci_hi"] < 0 else " "
+                        print(f"      {g:<8}k={sr['k']}  {sr['estimate']:+.4f}  "
+                              f"[{sr['ci_lo']:+.4f}, {sr['ci_hi']:+.4f}] {mark}")
+                        out_rows.append({
+                            "metric": metric, "estimand": f"source:{g}|method:{r['method']}",
+                            **{k: sr[k] for k in ("k","estimate","se","ci_lo","ci_hi","p","I2","tau2")}})
+                    out_rows.append({
+                        "metric": metric, "estimand": f"Qbetween|method:{r['method']}",
+                        "k": r["df"] + 1, "estimate": r["common"], "se": "",
+                        "ci_lo": "", "ci_hi": "", "p": r["p_between"],
+                        "I2": "", "tau2": ""})
+                print("\n    * = interval excludes zero. p-values are unadjusted and each")
+                print("    subgroup holds five transfers, so read this as description.")
+
     if out_prefix:
         out_path = _TABLES / f"{out_prefix}_meta.csv"
         keys = ["metric","estimand","k","estimate","se","ci_lo","ci_hi","p","I2","tau2"]
@@ -391,7 +485,8 @@ def run(prefix: str, clinical_margin: float, out_prefix: str | None,
             wr = csv.DictWriter(f, fieldnames=keys)
             wr.writeheader()
             for row in out_rows:
-                wr.writerow({k: (round(row[k], 6) if isinstance(row[k], float) else row[k]) for k in keys})
+                wr.writerow({k: (round(row[k], 6) if isinstance(row.get(k), float)
+                                 else row.get(k, "")) for k in keys})
         print(f"\n  Saved: {out_path}")
     print()
 
@@ -407,10 +502,14 @@ if __name__ == "__main__":
                     help="collassa i transfer che condividono il centro target "
                          "in un'unita' sola prima di poolare (raccomandato con "
                          "tutte e 30 le coppie ordinate)")
+    ap.add_argument("--by_source", action="store_true",
+                    help="also estimate each method's effect within each source "
+                         "center and test whether the estimates differ")
     ap.add_argument("--exclude", nargs="*", default=None, metavar="SUBSTR",
                     help="Drop bootstrap files whose name contains any of these "
                          "substrings, e.g. --exclude loco to keep the "
                          "center-to-center design separate from the LOCO folds.")
     args = ap.parse_args()
     run(args.prefix, args.clinical_margin, args.out_prefix or args.prefix,
-        exclude=args.exclude, by_target=args.by_target)
+        exclude=args.exclude, by_target=args.by_target,
+        by_source=args.by_source)
