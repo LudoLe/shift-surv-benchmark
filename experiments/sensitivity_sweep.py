@@ -105,6 +105,17 @@ from generator.parameters import BaseParams
 from generator.scenarios import generate_scenario
 from utils.io import save_table_csv
 
+# The sweep freezes hyperparameters so that a change in verdict is attributable
+# to the generator configuration and not to the selection. That is the right
+# design for the discrimination claims, where the criterion moves AUROC by at
+# most 0.004 across the whole grid. It is the wrong design for the calibration
+# claims about DANN and CDAN, whose reported effect comes from a benchmark that
+# selects per run: frozen, both methods lose the effect entirely (measurement
+# +0.028 tuned against -0.003 frozen; concept +0.033 against -0.027). To check
+# those claims across configurations the selection has to be on, so --tune_nets
+# turns it on for the two adversarial methods only. Everything else stays fixed.
+_TUNE_NETS = False
+
 _TABLES = _ROOT / "outputs" / "tables"
 _CONFIG = _ROOT / "configs" / "generator.yaml"
 
@@ -592,8 +603,8 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
                         vals_ece[_k] = _res[_k]["target"]["ece"]
                 if with_nets:
                     from experiments.adaptation_methods import fit_dann, fit_cdan
-                    _res["dann"] = fit_dann(src, tgt, seed=s, use_iwcv=False)
-                    _res["cdan"] = fit_cdan(src, tgt, seed=s, use_iwcv=False)
+                    _res["dann"] = fit_dann(src, tgt, seed=s, use_iwcv=_TUNE_NETS)
+                    _res["cdan"] = fit_cdan(src, tgt, seed=s, use_iwcv=_TUNE_NETS)
                     for _k in ("dann", "cdan"):
                         vals[_k] = _res[_k]["target"]["auroc"]
                         vals_ece[_k] = _res[_k]["target"]["ece"]
@@ -1167,6 +1178,9 @@ if __name__ == "__main__":
     # makes. --no_nets restores the reduced family where the budget requires it.
     ap.add_argument("--with_nets", dest="with_nets", action="store_true", default=None)
     ap.add_argument("--no_nets", dest="with_nets", action="store_false")
+    ap.add_argument("--tune_nets", action="store_true",
+                    help="select DANN/CDAN hyperparameters per run via IWCV, as "
+                         "the benchmark does; slower by roughly a factor of ten")
     ap.add_argument("--out_prefix", default=None)
     args = ap.parse_args()
 
@@ -1176,8 +1190,10 @@ if __name__ == "__main__":
     if args.mode != "confirm" and (args.confirm_min_erm is not None
                                    or args.confirm_only_breaks):
         ap.error("--confirm_min_erm e --confirm_only_breaks valgono solo con --mode confirm")
+    _TUNE_NETS = bool(args.tune_nets)
     print(f"\n  modalita' {args.mode}, {args.n_source_domains} sorgente/i, "
-          f"famiglia {'con' if args.with_nets else 'senza'} DANN/CDAN")
+          f"famiglia {'con' if args.with_nets else 'senza'} DANN/CDAN"
+          f"{', DANN/CDAN tunati per run' if _TUNE_NETS else ''}")
     t0 = time.time()
     if args.mode == "confirm":
         srcs = args.confirm_from or [str(_TABLES / f"sensitivity_{m}_{args.n_source_domains}src.csv")
