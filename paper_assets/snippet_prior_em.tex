@@ -1,0 +1,31 @@
+% =====================================================================
+% Nuovo paragrafo per §V-D, dopo il capoverso su prior recalibration.
+% Numeri: i3lung_prior_estimability.csv (30 transfer, 10 semi).
+% =====================================================================
+
+The reason prior adjustment behaves this way is measurable. The method needs the
+target class prior, which it does not observe, so it estimates it from the
+source model's predictions on unlabeled target covariates. We read that estimate
+out and compared it against the truth on all thirty transfers. It is off by
+$0.163$ in median absolute error, on a quantity whose true value spans $0.227$
+across the cohort, and the failures are large: for four transfers the estimated
+prevalence sits above $0.98$ where the true value is below $0.80$, and for four
+others it falls below $0.35$ where the true value is above $0.64$. The damage
+the method does follows that error closely (Spearman $\rho=-0.80$): where the
+prior is estimated well the correction is harmless or helpful, and where it is
+estimated badly the correction degrades calibration in proportion.
+
+This locates the failure. The assumption prior adjustment makes is reasonable
+and the correction it applies is correct given the prior; what breaks is the
+estimate of a quantity that the target cohort does not reveal. It also explains
+the heterogeneity reported above, since an effect governed by an estimation
+error that ranges from $0.003$ to $0.574$ has no meaningful average.
+
+A deployment cannot use this. Detecting that the estimate went wrong requires
+comparing it against the target labels, which is the information the estimate
+exists to replace, and inspecting the estimate for implausibility does not work
+either: the transfer where prior adjustment performs best returns an estimated
+prevalence of $0.982$, at the boundary of the parameter space. The thirty
+transfers share six centers and are not independent, and this analysis was
+carried out after the main results, so we report it as an explanation of an
+observed pattern rather than as a confirmatory finding.
