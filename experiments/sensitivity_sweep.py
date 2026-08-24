@@ -579,7 +579,8 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
             _y = np.asarray(tgt.y)
             try:
                 _res = {
-                    "erm":  fit_all_observed(src, tgt),
+                    "erm":  fit_all_observed(src, tgt, use_iwcv=_TUNE_ALL,
+                                             seed=s),
                     "latent_oracle": fit_invariant_oracle(src, tgt),
                     "obs_oracle": fit_observed_target_oracle(src, tgt, seed=s),
                     "coral": fit_coral(src, tgt, seed=s, use_iwcv=_TUNE_ALL),
