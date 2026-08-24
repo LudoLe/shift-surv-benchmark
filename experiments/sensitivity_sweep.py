@@ -116,6 +116,15 @@ from utils.io import save_table_csv
 # turns it on for the two adversarial methods only. Everything else stays fixed.
 _TUNE_NETS = False
 
+# --tune_all extends the selection to every method that has a hyperparameter to
+# select. IW-ERM and CORAL matter most here: the paper's claim is negative, and a
+# null obtained at one fixed setting invites the answer that the method was never
+# given its chance. IW-ERM is the sharper case, since its clipping range governs
+# how extreme the importance weights become and extreme weights are the most
+# likely reason it degrades the fitted probabilities. Prior adjustment and Platt
+# scaling have no hyperparameters, so no protocol choice reaches them.
+_TUNE_ALL = False
+
 _TABLES = _ROOT / "outputs" / "tables"
 _CONFIG = _ROOT / "configs" / "generator.yaml"
 
@@ -573,8 +582,8 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
                     "erm":  fit_all_observed(src, tgt),
                     "latent_oracle": fit_invariant_oracle(src, tgt),
                     "obs_oracle": fit_observed_target_oracle(src, tgt, seed=s),
-                    "coral": fit_coral(src, tgt, seed=s),
-                    "iw_erm": fit_iw_erm(src, tgt, seed=s),
+                    "coral": fit_coral(src, tgt, seed=s, use_iwcv=_TUNE_ALL),
+                    "iw_erm": fit_iw_erm(src, tgt, seed=s, use_iwcv=_TUNE_ALL),
                 }
                 vals = {k: v["target"]["auroc"] for k, v in _res.items()}
                 # Inside the same try: a seed on which any fit is numerically
@@ -596,15 +605,17 @@ def _evaluate(regime: str, cfgv: dict, seeds: list[int], n: int,
                 if n_src >= 2:
                     from experiments.adaptation_methods import fit_irm
                     from experiments.group_dro import fit_group_dro
-                    _res["irm"] = fit_irm(src, tgt, seed=s)
-                    _res["group_dro"] = fit_group_dro(src, tgt, seed=s)
+                    _res["irm"] = fit_irm(src, tgt, seed=s, use_iwcv=_TUNE_ALL)
+                    _res["group_dro"] = fit_group_dro(src, tgt, seed=s,
+                                                      use_iwcv=_TUNE_ALL)
                     for _k in ("irm", "group_dro"):
                         vals[_k] = _res[_k]["target"]["auroc"]
                         vals_ece[_k] = _res[_k]["target"]["ece"]
                 if with_nets:
                     from experiments.adaptation_methods import fit_dann, fit_cdan
-                    _res["dann"] = fit_dann(src, tgt, seed=s, use_iwcv=_TUNE_NETS)
-                    _res["cdan"] = fit_cdan(src, tgt, seed=s, use_iwcv=_TUNE_NETS)
+                    _nets = _TUNE_NETS or _TUNE_ALL
+                    _res["dann"] = fit_dann(src, tgt, seed=s, use_iwcv=_nets)
+                    _res["cdan"] = fit_cdan(src, tgt, seed=s, use_iwcv=_nets)
                     for _k in ("dann", "cdan"):
                         vals[_k] = _res[_k]["target"]["auroc"]
                         vals_ece[_k] = _res[_k]["target"]["ece"]
@@ -1178,6 +1189,9 @@ if __name__ == "__main__":
     # makes. --no_nets restores the reduced family where the budget requires it.
     ap.add_argument("--with_nets", dest="with_nets", action="store_true", default=None)
     ap.add_argument("--no_nets", dest="with_nets", action="store_false")
+    ap.add_argument("--tune_all", action="store_true",
+                    help="select hyperparameters per run for every method that "
+                         "has one: IW-ERM, CORAL, IRM, GroupDRO, DANN, CDAN")
     ap.add_argument("--tune_nets", action="store_true",
                     help="select DANN/CDAN hyperparameters per run via IWCV, as "
                          "the benchmark does; slower by roughly a factor of ten")
@@ -1191,9 +1205,10 @@ if __name__ == "__main__":
                                    or args.confirm_only_breaks):
         ap.error("--confirm_min_erm e --confirm_only_breaks valgono solo con --mode confirm")
     _TUNE_NETS = bool(args.tune_nets)
+    _TUNE_ALL = bool(args.tune_all)
     print(f"\n  modalita' {args.mode}, {args.n_source_domains} sorgente/i, "
           f"famiglia {'con' if args.with_nets else 'senza'} DANN/CDAN"
-          f"{', DANN/CDAN tunati per run' if _TUNE_NETS else ''}")
+          f"{', tutti i metodi tunati per run' if _TUNE_ALL else (', DANN/CDAN tunati per run' if _TUNE_NETS else '')}")
     t0 = time.time()
     if args.mode == "confirm":
         srcs = args.confirm_from or [str(_TABLES / f"sensitivity_{m}_{args.n_source_domains}src.csv")
