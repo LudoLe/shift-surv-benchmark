@@ -16,38 +16,134 @@ independent censoring and a mixture-cure model, used only by the appendix `cure_
 We do not fit time-to-event models (Cox, RSF, DeepSurv) — extending the protocol to censored,
 curve-level evaluation is left as future work.
 
-## Setup
+## Reproducing the paper
+
+The result tables the paper is built from are tracked in this repository, so the
+figures can be rebuilt without rerunning anything:
 
 ```bash
-python -m venv shift-surv-env
-source shift-surv-env/bin/activate
-pip install -r requirements.txt
+jupyter notebook reproduce_figures.ipynb
 ```
 
-## Run the benchmark
+The sections below rebuild those tables from scratch. Each stage writes to
+`outputs/tables/` and is independent of the others, so they can be run in any
+order or skipped.
+
+### 0. Environment
+
+`adapt==0.4.5` targets Keras 2, and TensorFlow 2.16 and later ship Keras 3, which
+silently degrades DANN and CDAN. The pins therefore need Python 3.10 or 3.11.
 
 ```bash
-# Main benchmark (7 core scenarios × 8 methods × 10 seeds)
+bash setup_env.sh          # creates the conda environment and installs the pins
+conda activate shift310
+python -c "import adapt, tensorflow; print(adapt.__version__, tensorflow.__version__)"
+```
+
+### 1. Synthetic benchmark
+
+Produces the discrimination and calibration results per shift regime, under both
+the adaptation protocol and the domain-generalization protocol.
+
+```bash
+bash experiments/run_all_synthetic.sh
+```
+
+Writes `benchmark_1s1t_iwcv_*`, `benchmark_1s1t_prior_*`, `benchmark_3s1t_*`,
+`benchmark_1s1t_full_*` and `ablation_no_iwcv_*`. Around two hours on a machine
+with a few free cores; the individual commands are listed further down for
+running one at a time.
+
+### 2. I3LUNG
+
+Needs the cohort, which is not public. The directory must contain `cb.csv`,
+`outcomes.csv` and `features.json`.
+
+```bash
+export I3LUNG_DATA=/path/to/I3LUNG_DATA
+bash experiments/run_all_realdata.sh $I3LUNG_DATA        # 30 directed transfers
+python -m experiments.run_real_data --dataset i3lung \
+       --data_dir $I3LUNG_DATA --loco                    # leave-one-centre-out
+python -m experiments.meta_analysis --prefix i3lung --by_target
+python -m experiments.meta_analysis --prefix i3lung --exclude loco \
+       --out_prefix i3lung_meta_pairs                    # thirty-pair control
+python -m experiments.meta_analysis --prefix i3lung_loco
+python -m experiments.prior_estimability --data_dir $I3LUNG_DATA
+python -m experiments.center_directions --data_dir $I3LUNG_DATA
+```
+
+The two meta-analyses answer different questions. `--by_target` pools the five
+transfers that share a target cohort and carries six disjoint units, which is the
+level at which the independence assumption holds; it is the analysis the paper
+quotes. The pairwise version treats all thirty transfers as units and is reported
+alongside as a control.
+
+### 3. Public registry
+
+Rotterdam and GBSG2 download themselves, so this stage needs no local data.
+
+```bash
+bash experiments/run_all_public.sh rotterdam_gbsg
+python -m experiments.meta_analysis --prefix public_rotterdam_gbsg
+```
+
+### 4. Sensitivity analysis
+
+Repeats the benchmark across the generator's free parameters, sampled with a
+Latin hypercube. Every method that has a hyperparameter is selected per run by
+the importance-weighted criterion, which is the protocol the main experiments
+use.
+
+```bash
+bash experiments/run_sensitivity_parallel.sh
+```
+
+This is the expensive stage, measured in machine-days rather than hours. It
+splits by regime and by source count, and each shard writes its own CSV, so the
+work survives an interruption and rerunning the script resumes from what is
+missing.
+
+### 5. Figures
+
+```bash
+jupyter notebook reproduce_figures.ipynb
+```
+
+or, one at a time:
+
+```bash
+python paper_assets/_gen_fig_disc.py
+python paper_assets/_gen_fig_cal.py
+python paper_assets/_gen_fig_realmain.py
+python paper_assets/_gen_fig_predictability.py
+```
+
+## Individual commands
+
+```bash
+# Adaptation protocol, one source centre, seven core scenarios
 python -m experiments.run_adaptation
 
-# Multi-source benchmark with the IRM + GroupDRO domain-generalization baselines
-# (both need >=2 source centers; they degenerate to ERM with one source):
+# Domain-generalization protocol: three source centres, adds IRM and GroupDRO
 python -m experiments.run_adaptation --n_source_domains 3 --out_prefix benchmark_3s1t
 
-# Real-data counterpart: leave-one-center-out multi-source DG on I3LUNG
-# (pools the other centers as sources; adds IRM + GroupDRO; feeds meta_analysis):
-python -m experiments.run_real_data --dataset i3lung --data_dir /path/to/I3LUNG_DATA --loco
-python -m experiments.meta_analysis --prefix i3lung_loco
-
-# Include appendix scenarios (strong_covariate_shift, cure_shift)
+# Appendix scenarios (strong_covariate_shift, cure_shift)
 python -m experiments.run_adaptation --include_appendix --out_prefix benchmark_1s1t_full
 
-# IWCV ablation — covariate_shift without importance-weighted HP tuning
+# Ablation: covariate shift without importance-weighted hyperparameter selection
 python -m experiments.run_adaptation --scenarios covariate_shift --no_iwcv \
     --out_prefix ablation_no_iwcv
+
+# One I3LUNG transfer
+python -m experiments.run_real_data --dataset i3lung --data_dir $I3LUNG_DATA \
+    --source INT --target GHD
+
+# Sensitivity, one regime at a time
+python -m experiments.sensitivity_sweep --mode worlds --n_source_domains 1 \
+    --regimes concept_shift --n_seeds 10 --n_worlds 100 --with_nets --tune_all
 ```
 
-Outputs are written to `outputs/tables/<prefix>_raw/summary/compact/hp_sweep.csv`.
+Outputs are written to `outputs/tables/<prefix>_{raw,summary,compact,maxstat}.csv`.
 
 ## Scenarios
 

@@ -17,6 +17,37 @@ outputs/figures/*
 !outputs/figures/paper/
 outputs [0-9]*/
 
+# ── Result tables the paper is built from ────────────────────────────────────
+# Every number and figure in the paper comes from the files below, so they are
+# tracked and a reader can rebuild the figures without rerunning anything. The
+# list is a whitelist rather than a wildcard: the same directory also holds
+# per-shard intermediates and patient-level bootstrap replicates, and those are
+# large, uninteresting, and easy to regenerate.
+!outputs/tables/
+outputs/tables/*
+!outputs/tables/benchmark_*_summary.csv
+!outputs/tables/benchmark_*_maxstat.csv
+!outputs/tables/benchmark_*_raw.csv
+!outputs/tables/ablation_*_summary.csv
+!outputs/tables/i3lung_*_summary.csv
+!outputs/tables/i3lung_*_shiftdiag.csv
+!outputs/tables/i3lung*meta*.csv
+!outputs/tables/i3lung_prior_estimability.csv
+!outputs/tables/center_directions_*.csv
+!outputs/tables/public_rotterdam_gbsg_*_summary.csv
+!outputs/tables/public_rotterdam_gbsg_*_shiftdiag.csv
+!outputs/tables/public_rotterdam_gbsg_meta*.csv
+!outputs/tables/sensitivity_*.csv
+!outputs/tables/sens_tuneall_worlds_*.csv
+!outputs/tables/sens_tuned_worlds_*.csv
+!outputs/tables/shift_audit_*.csv
+
+# Re-ignore what the patterns above would otherwise sweep in: one file per
+# sweep shard, and the bootstrap replicate matrices at five megabytes each.
+outputs/tables/*_s[0-9].csv
+outputs/tables/*_s[0-9][0-9].csv
+outputs/tables/*_bootreps.csv
+
 # ── Python cache ──────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
@@ -26,6 +57,7 @@ __pycache__/
 # ── Jupyter ───────────────────────────────────────────────────────────────────
 .ipynb_checkpoints/
 *.ipynb
+!reproduce_figures.ipynb
 
 # ── macOS ─────────────────────────────────────────────────────────────────────
 .DS_Store

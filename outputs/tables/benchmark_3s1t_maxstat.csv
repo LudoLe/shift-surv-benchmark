@@ -1,0 +1,13 @@
+scenario,metric,best,mean_gap,p_value,p_bonferroni,n_methods,n_perm
+covariate_shift,auroc,group_dro,-0.00134,0.98145,0.38637,2,1024
+observational_shift,auroc,group_dro,-0.00177,0.91211,0.92098,2,1024
+spurious_shift,auroc,group_dro,-0.00123,0.89062,1.0,2,1024
+baseline_hazard_shift,auroc,group_dro,0.00044,0.64453,1.0,2,1024
+prior_shift,auroc,group_dro,0.00271,0.04785,0.11139,2,1024
+concept_shift,auroc,irm,0.00451,0.29688,0.67881,2,1024
+covariate_shift,ece,platt_scaling,0.00179,0.72559,1.0,5,1024
+observational_shift,ece,group_dro,0.01236,0.04102,0.12023,5,1024
+spurious_shift,ece,group_dro,0.00309,0.6123,1.0,5,1024
+baseline_hazard_shift,ece,irm,0.02797,0.00098,0.0,5,1024
+prior_shift,ece,prior_recalib,0.16015,0.00098,0.0,5,1024
+concept_shift,ece,irm,0.02089,0.00391,0.00383,5,1024

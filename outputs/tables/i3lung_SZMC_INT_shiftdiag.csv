@@ -1,0 +1,2 @@
+source,target,tau,rbf_mmd,rbf_mmd_p,prevalence_gap,n_src,n_tgt,n_features
+SZMC,INT,,0.0487,0.001,0.1966,238,668,11
