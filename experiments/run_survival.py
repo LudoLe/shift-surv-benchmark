@@ -131,13 +131,16 @@ def _score_target(
             "ibs": round(ibs, 4) if ibs == ibs else ibs}
 
 
-def _fit_cox(feature_attr: str, src, tgt, tau: float) -> dict:
+def _fit_cox(feature_attr: str, src, tgt, tau: float, seed: int = 0) -> dict:
     """Fit one Cox model on the source feature view; score source-val and target."""
     X_all = getattr(src, feature_attr)
     y_all = src.y                       # only used to stratify the split
     idx = np.arange(src.n)
+    # Seeded like the real-data counterpart in run_survival_real.py, so the
+    # split contributes to the spread across seeds in both files rather than in
+    # one of them.
     idx_tr, idx_val = train_test_split(
-        idx, test_size=0.2, random_state=0,
+        idx, test_size=0.2, random_state=seed,
         stratify=y_all if len(np.unique(y_all)) > 1 else None,
     )
 
@@ -172,7 +175,7 @@ def _run_one(scenario: str, seed: int, n: int, censoring_lambda: float) -> tuple
 
     rows = []
     for feat, name in [("u_inv", "inv_oracle_cox"), ("x", "source_cox")]:
-        r = _fit_cox(feat, src, tgt, tau)
+        r = _fit_cox(feat, src, tgt, tau, seed=seed)
         gap_c  = round(r["source"]["c_index"] - r["target"]["c_index"], 4)
         rows.append({
             "scenario": scenario, "seed": seed, "model": name,

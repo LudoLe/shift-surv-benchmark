@@ -148,21 +148,26 @@ hold on both real cohorts. Our contributions are:
 
 \textbf{Survival validity check.}
 The analysis above uses a binary endpoint at $\tau=6$ months, which discards
-the $103$ patients whose status at that horizon is unknown and ignores the
+the $102$ patients whose status at that horizon is unknown and ignores the
 information in the censored follow-up. To confirm that the observed degradation
 is not produced by this dichotomization, we refitted all $30$ ordered center
 pairs as Cox proportional-hazards models on the full follow-up, using overall
 survival time and the death indicator. This retains all $2074$ patients and
-accommodates the $\approx\!30\%$ censoring. Discrimination degrades from source
-to target in $23$ of the $30$ transfers, with a median C-index gap of $+0.034$
-(range $-0.083$ to $+0.105$; Wilcoxon $p=0.004$). The size of the gap is
-uncorrelated with the fraction of patients each center loses to the fixed
-horizon (Spearman $\rho=-0.32$, $p=0.09$), and the sign of that association is
-opposite to what differential exclusion would produce, with the largest gaps
-occurring at $0\%$ and $12.8\%$ exclusion. The transport failure is therefore a
-property of the data and not of the endpoint definition. This check compares
-only ERM-equivalent models, since the adversarial baselines have no
-survival-loss counterpart.
+accommodates the censoring. Discrimination degrades from source to target in
+$23$ of the $30$ transfers, with a median C-index gap of $+0.034$ and a range
+of $-0.083$ to $+0.105$. We report these counts descriptively and attach no
+$p$-value to them: the thirty transfers are built from six centers, each of
+which appears in ten pairs, so they are not thirty independent observations and
+a test that assumes they are would overstate its own precision.
+
+The size of the gap does not follow the fraction of patients a center loses to
+the fixed horizon. The rank association is negative (Spearman $\rho=-0.32$),
+which is the opposite of what differential exclusion would produce, and the two
+largest gaps occur at $0\%$ and $12.8\%$ exclusion. The transport failure is
+therefore a property of the data rather than of the endpoint definition. This
+check compares ERM-equivalent models only, since the adversarial baselines have
+no survival-loss counterpart, so it speaks to whether discrimination degrades
+and not to whether adaptation could recover it.
 % ==== END survival check =============================================
 
 

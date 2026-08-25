@@ -12,7 +12,7 @@ Nobody is dropped. The binary endpoint requires a known status at tau, so
 patients censored before six months are excluded; in I3LUNG that is 0% of one
 centre and 17% of another, and 99% of the excluded are censored, with a median
 follow-up of three months. The centres being compared are therefore differently
-selected subsets. A Cox model uses (t_obs, delta) and keeps all 2075 patients.
+selected subsets. A Cox model uses (t_obs, delta) and keeps all 2074 patients.
 
 Censoring is handled rather than removed. Roughly 30% of I3LUNG patients are
 censored; the partial likelihood uses them, and Harrell's C is defined in their
@@ -60,6 +60,10 @@ TIME_COL, EVENT_COL = "OS MONTHS", "DEATH EVENT"
 
 
 def load_i3lung_survival(data_dir: str | Path, min_n: int = 150):
+    # NOTE. No patient is dropped for an unknown status at the horizon, which is
+    # the point of this check, but centres below min_n are skipped entirely, so
+    # the cohort total printed by the runner is conditional on min_n. At six
+    # centres of 191 and above the default filter removes nobody.
     """Every centre with (covariates, follow-up time, event indicator).
 
     Deliberately does not drop on the binary endpoint: keeping the patients the
@@ -134,9 +138,15 @@ def main() -> None:
     names = sorted(centers)
     print(f"I3LUNG survival check — {len(names)} centri, {len(feats)} covariate")
     tot = sum(len(centers[c]) for c in names)
-    cens = float(np.mean(np.r_[[centers[c][EVENT_COL].to_numpy() for c in names][0]] == 0)) \
+    # Pooled across centres. The earlier form indexed the list comprehension
+    # rather than the concatenation, so it reported the first centre's rate under
+    # the name of the cohort's, and nothing printed it.
+    cens = float(np.mean(np.concatenate(
+        [centers[c][EVENT_COL].to_numpy() for c in names]) == 0)) \
         if names else float("nan")
-    print(f"  {tot} pazienti in totale, nessuno escluso per stato ignoto a tau={args.tau:.0f}\n")
+    print(f"  {tot} pazienti nei {len(names)} centri con almeno {args.min_n} "
+          f"pazienti, nessuno escluso per stato ignoto a tau={args.tau:.0f}")
+    print(f"  censura complessiva: {100*cens:.1f}%\n")
 
     rows = []
     print(f"{'transfer':<20}{'n src':>7}{'n tgt':>7}{'C src':>8}{'C tgt':>8}{'gap':>8}"
