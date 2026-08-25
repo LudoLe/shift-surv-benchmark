@@ -41,6 +41,11 @@ outputs/tables/*
 !outputs/tables/sens_tuneall_worlds_*.csv
 !outputs/tables/sens_tuned_worlds_*.csv
 !outputs/tables/shift_audit_*.csv
+!outputs/tables/survival_cox_*.csv
+!outputs/tables/survival_real_transfers.csv
+!outputs/tables/nl_nsweep_*_summary.csv
+!outputs/tables/nl_nsweep_*_compact.csv
+!outputs/tables/oat_tuneall_worlds_*.csv
 
 # Re-ignore what the patterns above would otherwise sweep in: one file per
 # sweep shard, and the bootstrap replicate matrices at five megabytes each.
