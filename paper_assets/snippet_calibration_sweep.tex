@@ -1,43 +1,50 @@
 % =====================================================================
 % Sostituisce §V-A-2 (calibrazione, protocollo di adattamento).
 % Numeri: benchmark_1s1t_iwcv_summary.csv, benchmark_1s1t_prior_summary.csv,
-% sens_tuned_worlds_1src_{observational,concept}_shift.csv (2026-08-21).
+% sens_tuneall_worlds_{1,3}src.csv (2026-08-25, tutti i metodi tunati per run).
+% Le frequenze sono su 100 configurazioni per regime, criterio: intervallo
+% che esclude lo zero, lo stesso usato per la discriminazione.
 % =====================================================================
 
 \subsubsection{Calibration}
-Calibration responds to shift in a way discrimination does not. Under
-label-prior shift, prior adjustment reduces target ECE from $0.217$ to $0.088$
-against an oracle floor of $0.060$, and this is the one pairing in which a
-method's assumption matches the mechanism the generator applied. The direction
-was stated before the runs: the same method degrades calibration under every
-other regime, and it does so in $66$ of $100$ configurations under covariate
-shift and $70$ of $100$ under measurement shift.
+Calibration responds to shift where discrimination does not. Under label-prior
+shift, prior adjustment reduces target ECE from $0.217$ to $0.088$ against an
+oracle floor of $0.060$. This is the one pairing in which a method's assumption
+matches the mechanism the generator applied, and it is the only calibration
+result for which we declared a direction before running: the method was expected
+to improve ECE under isolated label-prior shift and to degrade it under every
+other mechanism. Across the sampled configuration space it does both. It
+improves calibration in $86$ of $100$ configurations under label-prior shift and
+in $87$ of $100$ with three source centers, and it degrades calibration under
+every other regime, in $68$ of $100$ configurations under measurement shift and
+$60$ of $100$ under covariate shift.
 
-Two adversarial methods also improve calibration, DANN under measurement shift
-and CDAN under concept shift. Both effects hold across the configuration space
-rather than at the benchmark point alone. Over $100$ sampled generator
-configurations DANN lowers target ECE in $81$ of them under measurement shift
-and CDAN in $86$ under concept shift. The size varies: where the interval
-excludes zero the median reduction is $0.033$ and $0.037$, and where it does not
-the median is $0.003$ and $0.004$. The direction is stable throughout, and the
-effect falls below what ten seeds resolve in roughly half the space.
+Post-hoc rescaling improves calibration more broadly and assumes nothing about
+the mechanism. Platt scaling lowers target ECE in $82$ of $100$ configurations
+under concept shift, $62$ under measurement shift, $55$ under
+spurious-association shift and $38$ under covariate shift. The two methods
+divide the space between them: Platt scaling estimates its correction on source
+data, so it cannot follow a class prior that moves in the target, and
+label-prior shift is the one regime where it degrades calibration rather than
+improving it.
 
-The benefit depends on selecting hyperparameters for each run. With the
-hyperparameters held at a single setting, the same two methods raise target ECE
-instead of lowering it, in $75$ and $93$ configurations of $100$. Both patterns
-are far from an even split, so the reversal is a property of the selection and
-not sampling noise. A practitioner who applies these methods at default settings
-should expect the opposite of the published effect.
+The adversarial methods also improve calibration, and which of them helps
+depends on how many source centers are available. With one source, DANN and
+CDAN lower target ECE in $61$ of $100$ configurations under concept shift and in
+$42$ and $40$ under measurement shift, while degrading it in at most five. With
+three sources the ordering reverses: DANN and CDAN degrade calibration under
+most regimes, and the invariance penalties take their place, IRM improving ECE
+in $74$ of $100$ configurations under baseline-hazard shift and $71$ under
+concept shift, and GroupDRO in $75$ and $58$. More source centers give an
+invariance penalty the contrast it needs and give an adversarial discriminator
+a harder problem.
 
-Neither effect is specific to the mechanism it accompanies. Under no shift at
-all, DANN lowers target ECE by $0.010$ and CDAN by $0.013$, which is most of
-what they achieve under the regimes where they help. Adversarial training
-produces better calibrated probabilities whether or not there is a shift to
-correct, so an observed calibration gain carries little information about which
-mechanism is present. Prior adjustment is the exception: its gain of $0.136$
-over the no-shift level appears under label-prior shift and nowhere else.
-
-Platt scaling improves calibration more broadly and assumes nothing about the
-mechanism, reducing ECE in $66$ of $100$ configurations under measurement shift
-and $73$ of $100$ under concept shift. No single strategy improves
-discrimination and calibration together.
+Two qualifications belong with these numbers. The adversarial benefit requires
+selecting hyperparameters for each run: held at a single setting, DANN and CDAN
+raise target ECE in $75$ and $93$ configurations of $100$, reversing the sign of
+the effect. And neither adversarial effect is specific to the mechanism it
+accompanies, since under no shift at all DANN lowers target ECE by $0.010$ and
+CDAN by $0.013$, which is most of what they achieve under the regimes where they
+help. Prior adjustment carries no such ambiguity, improving calibration by
+$0.136$ over its no-shift level under label-prior shift and by nothing
+elsewhere. No single strategy improves discrimination and calibration together.
