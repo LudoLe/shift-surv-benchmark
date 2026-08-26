@@ -1,0 +1,38 @@
+% =====================================================================
+% Sostituisce i due paragrafi di risultati della sezione sensitivity
+% ("Across the 1392 configurations..." e quello sulla calibrazione).
+% Numeri: sens_tuneall_{oat,worlds}_{1,3}src.csv e
+% sens_tuneall_confirm_*.csv, run del 2026-08-25/26, tutti i metodi
+% selezionati per run.
+% =====================================================================
+
+Across the $1692$ configurations, $1120$ were uninformative and $429$ were
+supported. Fifty-nine configurations reached the threshold for a candidate
+counterexample and were re-run on twenty seeds disjoint from the screening set.
+Fourteen reproduced. Every one of them lies where ERM ranks target patients
+below chance, and the method that gains there stays below $0.5$ AUROC after the
+gain, reaching at most $0.456$: the improvement moves a model from clearly wrong
+towards uninformative rather than towards useful. Of the candidates in which ERM
+ranked above chance, none reproduced. The largest screening gain of $+0.113$
+fell to $+0.022$ with an interval covering zero, and the rest fell below
+$+0.021$. Across the pre-specified parameter space, with every method selected
+per run, no adaptation gain survives confirmation.
+
+The two designs behave differently, and the difference is itself informative.
+Varying one parameter at a time around the benchmark configuration produces
+$492$ settings, one candidate counterexample, and a largest gain of $+0.033$;
+that candidate did not reproduce. The Latin hypercube design, which moves the
+parameters together, produces every confirmed candidate. A single-parameter
+perturbation therefore understates how far the conclusion can be pushed, and
+reporting it alone would have been the weaker check.
+
+The calibration results reproduce the pattern of the main experiments. The
+directional rule held: prior adjustment improved ECE in $86$ of $100$
+configurations under isolated label-prior shift with one source and $87$ of
+$100$ with three, and degraded calibration under every other mechanism. The
+effects reported for the remaining methods also reappeared across the space,
+with Platt scaling the most consistent at one source, in $82$ and $62$
+configurations of $100$ under concept and measurement shift, and the invariance
+penalties the most consistent at three, IRM improving ECE in $74$ and $71$ of
+$100$ under baseline-hazard and concept shift. No qualitative conclusion of the
+main experiments changed across the pre-specified parameter space.
