@@ -90,6 +90,10 @@ def _erm_by_target(prefix: str) -> dict[str, list[tuple[str, float, float]]]:
         if not m:
             continue
         src, tgt = m.groups()
+        # The public-registry runner appends a configuration tag to the transfer
+        # name (``GBSG2_Rotterdam_def``), so the target here is "Rotterdam_def"
+        # unless the tag is removed.
+        tgt = re.sub(r"_(def|tau\d+)$", "", tgt)
         for r in csv.DictReader(open(f)):
             if r.get("method") != "lr_erm":
                 continue
