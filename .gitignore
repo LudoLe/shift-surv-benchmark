@@ -43,6 +43,7 @@ outputs/tables/*
 !outputs/tables/shift_audit_*.csv
 !outputs/tables/survival_cox_*.csv
 !outputs/tables/survival_real_transfers.csv
+!outputs/tables/*_target_oracle.csv
 !outputs/tables/nl_nsweep_*_summary.csv
 !outputs/tables/nl_nsweep_*_compact.csv
 !outputs/tables/oat_tuneall_worlds_*.csv
