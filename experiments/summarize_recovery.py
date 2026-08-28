@@ -42,7 +42,8 @@ _ROOT   = Path(__file__).parent.parent
 _TABLES = _ROOT / "outputs" / "tables"
 
 AUROC_FAMILY = ["iw_erm", "coral", "dann", "cdan"]
-ECE_FAMILY   = ["iw_erm", "prior_recalib", "platt_scaling", "coral", "dann", "cdan"]
+ECE_FAMILY   = ["iw_erm", "prior_recalib", "platt_scaling", "isotonic",
+                "coral", "dann", "cdan"]
 ALPHA        = 0.05
 
 

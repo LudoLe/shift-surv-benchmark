@@ -5,6 +5,7 @@ from __future__ import annotations
 import warnings
 
 import numpy as np
+from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
 
 __all__ = ["fit_platt", "is_rank_preserving"]
@@ -83,6 +84,50 @@ def fit_platt(
     p_val_c = platt.predict_proba(p_val.reshape(-1, 1))[:, 1]
     p_tgt_c = platt.predict_proba(p_tgt.reshape(-1, 1))[:, 1]
     return p_val_c, p_tgt_c, platt, False
+
+
+def fit_isotonic(
+    p_val: np.ndarray,
+    y_val: np.ndarray,
+    p_tgt: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, object, bool]:
+    """Isotonic recalibration: a non-decreasing step function fitted on the
+    source validation split and applied to the target.
+
+    Same contract as ``fit_platt``: returns
+    ``(p_val_calibrated, p_tgt_calibrated, calibrator, fell_back)``.
+
+    Why no monotonicity guard is needed
+    -----------------------------------
+    ``IsotonicRegression(increasing=True)`` cannot fit a decreasing map, so the
+    inversion that Platt scaling can produce on a small calibration set is
+    impossible here by construction. What isotonic does instead is create ties:
+    it is a step function, so patients whose raw probabilities fall inside the
+    same step become indistinguishable. That leaves AUROC slightly below ERM's
+    rather than exactly equal, which is why isotonic is not treated as a
+    rank-preserving method in the discrimination test.
+
+    ``out_of_bounds="clip"`` keeps target probabilities outside the validation
+    range at the boundary values rather than returning NaN, which a target
+    cohort more extreme than the source will otherwise trigger.
+    """
+    p_val = np.asarray(p_val, dtype=float).ravel()
+    p_tgt = np.asarray(p_tgt, dtype=float).ravel()
+    y_val = np.asarray(y_val).astype(int).ravel()
+
+    if len(np.unique(y_val)) < 2:
+        warnings.warn(
+            "Isotonic calibration requires both classes in the validation "
+            "split; falling back to uncalibrated probabilities.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return p_val.copy(), p_tgt.copy(), None, True
+
+    iso = IsotonicRegression(y_min=0.0, y_max=1.0, increasing=True,
+                             out_of_bounds="clip")
+    iso.fit(p_val, y_val)
+    return iso.predict(p_val), iso.predict(p_tgt), iso, False
 
 
 def is_rank_preserving(p_raw: np.ndarray, p_cal: np.ndarray, tol: float = 1e-9) -> bool:

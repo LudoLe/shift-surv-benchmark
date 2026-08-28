@@ -61,7 +61,8 @@ _TABLES = _ROOT / "outputs" / "tables"
 # prior_recalib / platt_scaling are rank-preserving -> excluded from the AUROC
 # family by construction (their AUROC gap is ~0), included for ECE.
 _DISC_METHODS  = ["iw_erm", "coral", "dann", "cdan", "irm", "group_dro"]
-_CALIB_METHODS = ["iw_erm", "prior_recalib", "platt_scaling", "coral", "dann", "cdan", "irm", "group_dro"]
+_CALIB_METHODS = ["iw_erm", "prior_recalib", "platt_scaling", "isotonic",
+                  "coral", "dann", "cdan", "irm", "group_dro"]
 _Z95 = 1.959963984540054
 
 

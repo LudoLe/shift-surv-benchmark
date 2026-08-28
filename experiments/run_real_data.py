@@ -11,7 +11,8 @@ Protocol mirrors the synthetic benchmark:
   - Median imputation fitted on source train only
   - StandardScaler fitted on source train only
   - Target labels never used during training or HP selection
-  - Same methods: lr_erm, coral, prior_recalib, dann, cdan
+  - Same methods: lr_erm, iw_erm, coral, dann, cdan, prior_recalib,
+    platt_scaling, isotonic (and irm, group_dro under --loco)
 
 Usage
 -----
@@ -42,7 +43,7 @@ from sklearn.preprocessing import StandardScaler
 from utils.metrics import auroc, auprc, ece, f1, sensitivity, specificity, prevalence
 from utils.io import save_table_csv
 from utils.shift_diag import rbf_mmd, rbf_mmd_permutation
-from utils.calibration import fit_platt
+from utils.calibration import fit_platt, fit_isotonic
 
 import matplotlib
 matplotlib.use("Agg")
@@ -370,6 +371,19 @@ def _run_seed(
         "source_pooled": _score(y_val, p_val_platt),
         "target": _score(y_tgt, p_tgt_platt),
         "tgt_probs": np.asarray(p_tgt_platt),
+    })
+
+    # --- Isotonic calibration ---
+    # Same source validation split and same raw probabilities as Platt, so the
+    # two differ only in the shape of the fitted map. It reuses the shared
+    # helper for the same reason Platt does: the synthetic and real baselines
+    # are then the same method by construction rather than by a comment.
+    p_val_iso, p_tgt_iso, _, _ = fit_isotonic(p_val_raw, y_val, p_tgt_raw)
+    results.append({
+        "method": "isotonic",
+        "source_pooled": _score(y_val, p_val_iso),
+        "target": _score(y_tgt, p_tgt_iso),
+        "tgt_probs": np.asarray(p_tgt_iso),
     })
 
     # --- CORAL ---
