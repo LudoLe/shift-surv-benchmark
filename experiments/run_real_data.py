@@ -448,8 +448,13 @@ def _run_seed(
 
 _METRIC_KEYS = ["src_auroc", "tgt_auroc", "tgt_ece", "tgt_f1",
                 "tgt_sensitivity", "tgt_specificity", "gap"]
-_METHODS     = ["lr_erm", "iw_erm", "prior_recalib", "platt_scaling", "coral",
-                "irm", "group_dro", "dann", "cdan"]
+# isotonic sits after platt_scaling because that is fit order in _run_seed; the
+# raw table and the bootstrap collect methods dynamically, so this list only
+# governs which rows the summary keeps and how the console report is ordered.
+# Leaving a method out of it silently drops it from the summary, which is
+# exactly what happened when isotonic was added to the fits but not here.
+_METHODS     = ["lr_erm", "iw_erm", "prior_recalib", "platt_scaling", "isotonic",
+                "coral", "irm", "group_dro", "dann", "cdan"]
 
 
 def _flatten_real(r: dict, seed: int) -> dict:
