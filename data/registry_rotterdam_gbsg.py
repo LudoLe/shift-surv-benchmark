@@ -8,9 +8,12 @@ Centers
 
 Outcome
 -------
-  Recurrence-free survival (RFS) in months.
-  Event = first recurrence or death (whichever comes first).
-  Time converted from days: months = days / 30.44.
+  Time to event in months (days / 30.44). The two cohorts record it
+  differently, and the loaders follow each cohort's own convention:
+    Rotterdam : time to first recurrence (rtime, recur); patients who die
+                without a recorded recurrence contribute censored times.
+    GBSG2     : recurrence-free survival as shipped by sksurv (first of
+                recurrence or death).
 
 Harmonised features (8)
 -----------------------

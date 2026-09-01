@@ -118,6 +118,25 @@ python paper_assets/_gen_fig_realmain.py
 python paper_assets/_gen_fig_predictability.py
 ```
 
+## Additional analyses
+
+The diagnostic analyses quoted in the paper each have a module of their own:
+`real_target_oracle` fits the observed-data reference per target center,
+`prior_estimability` reads out the EM estimate of the target prevalence,
+`center_directions` compares the decision directions the centers' models learn,
+`coral_covariance_check` ranks transfers by the covariance distance CORAL
+aligns, and `collect_sweep` merges the sharded sensitivity sweep and prints the
+counts the paper quotes. `rebuild_summaries` regenerates every summary table
+from its raw table without refitting. `registry_seer.py` and
+`registry_support2.py` are additional public-registry loaders that the paper
+does not use.
+
+Two reproducibility notes. `outputs/tables` is tracked: commit rerun outputs
+before rebasing, or the rebase will overwrite them with the committed versions.
+And the DANN/CDAN rows are not bit-reproducible across runs -- TensorFlow
+training is nondeterministic -- so those entries reproduce in distribution,
+while every other method reproduces exactly.
+
 ## Individual commands
 
 ```bash

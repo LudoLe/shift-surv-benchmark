@@ -36,26 +36,6 @@ def clip_times(t: np.ndarray, t_max: float) -> np.ndarray:
     return np.clip(t, a_min=None, a_max=t_max)
 
 
-def make_binary_label(
-    t: np.ndarray,
-    delta: np.ndarray,
-    tau: float,
-) -> np.ndarray:
-    """
-    Fixed-horizon binary label: y = 1[t <= tau AND delta == 1].
-
-    Parameters
-    ----------
-    t     : observed times (already clipped if desired)
-    delta : event indicators (1=event, 0=censored)
-    tau   : prediction horizon (same units as t)
-
-    Returns
-    -------
-    y     : (n,) int binary label array
-    """
-    return ((t <= tau) & (delta == 1)).astype(int)
-
 
 def impute_median(X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """

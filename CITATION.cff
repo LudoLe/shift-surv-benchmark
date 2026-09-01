@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+message: "If you use this benchmark, please cite the paper below."
+title: "SHIFT-SURV: Diagnosing Why Domain Adaptation Fails in Multi-Center Survival Risk Prediction"
+authors:
+  - family-names: Lerma
+    given-names: Ludovica
+  - family-names: Miskovic
+    given-names: Vanja
+  - family-names: Prelaj
+    given-names: Arsela
+  - family-names: "Trovò"
+    given-names: Francesco
+year: 2026
+repository-code: "https://github.com/LudoLe/shift-surv-benchmark"
