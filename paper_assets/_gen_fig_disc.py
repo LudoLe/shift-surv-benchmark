@@ -283,7 +283,7 @@ def draw_panel(ax, panel_key: str) -> None:
     ax.set_axisbelow(True)
 
     ax.legend(handles=[
-        Patch(facecolor=C_OBS_ORACLE, label="Target-data oracle"),
+        Patch(facecolor=C_OBS_ORACLE, label="Observed-data reference"),
         Line2D([0], [0], color=C_LAT_ORACLE, lw=1.3, ls=(0, (4, 2)),
                label="Latent-feature reference"),
         Patch(facecolor=C_ERM, label="ERM"),
