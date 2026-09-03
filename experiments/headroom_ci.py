@@ -151,12 +151,30 @@ def main() -> None:
                      "headroom_auroc": round(tab_h, 4),
                      "auroc_lo": round(float(lo_a), 4),
                      "auroc_hi": round(float(hi_a), 4),
+                     "auroc_se": round(float(np.std(d_auc, ddof=1)), 4),
+                     "ece_est": round(float(np.mean(d_ece)), 4),
                      "ece_lo": round(float(lo_e), 4),
                      "ece_hi": round(float(hi_e), 4),
+                     "ece_se": round(float(np.std(d_ece, ddof=1)), 4),
                      "n_boot": a.n_boot})
         star = "*" if lo_a > 0 else " "
         print(f"  {tgt:<6} margine {tab_h:+.3f}  IC95 [{lo_a:+.3f}, {hi_a:+.3f}]{star}"
               f"   ECE [{lo_e:+.3f}, {hi_e:+.3f}]", flush=True)
+
+    from experiments.meta_analysis import dersimonian_laird
+    base = list(rows)
+    for met, ek, sk in (("auroc", "headroom_auroc", "auroc_se"),
+                        ("ece", "ece_est", "ece_se")):
+        est = np.array([r[ek] for r in base], float)
+        se = np.array([r[sk] for r in base], float)
+        d = dersimonian_laird(est, se)
+        rows.append({"target": f"POOLED_DL_{met}", "n": sum(r["n"] for r in base),
+                     "headroom_auroc": round(d["estimate"], 4),
+                     "auroc_lo": round(d["ci_lo"], 4), "auroc_hi": round(d["ci_hi"], 4),
+                     "auroc_se": round(d["se"], 4), "ece_est": "", "ece_lo": "",
+                     "ece_hi": "", "ece_se": "", "n_boot": f"I2={d['I2']:.0f} p={d['p']:.5f}"})
+        print(f"  POOLED {met}: {d['estimate']:+.4f} [{d['ci_lo']:+.4f}, {d['ci_hi']:+.4f}]"
+              f"  p={d['p']:.5f}  I2={d['I2']:.0f}%", flush=True)
 
     save_table_csv(rows, _TABLES / "i3lung_headroom_ci.csv")
     k = sum(1 for r in rows if r["auroc_lo"] > 0)
