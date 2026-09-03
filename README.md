@@ -131,6 +131,13 @@ from its raw table without refitting. `registry_seer.py` and
 `registry_support2.py` are additional public-registry loaders that the paper
 does not use.
 
+Naming note: the paper calls the two reference models the latent-feature
+reference and the observed-data reference. In the code and in the result
+tables they appear under their working names, invariant_oracle and
+observed_target_oracle (module experiments/real_target_oracle.py, tables
+*_target_oracle.csv). Same objects, earlier names, kept so that the tracked
+tables remain byte-identical to the published runs.
+
 Two reproducibility notes. `outputs/tables` is tracked: commit rerun outputs
 before rebasing, or the rebase will overwrite them with the committed versions.
 And the DANN/CDAN rows are not bit-reproducible across runs -- TensorFlow

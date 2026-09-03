@@ -1,5 +1,8 @@
 """The target-data oracle on the real cohorts.
 
+Paper naming: this module computes what the paper calls the observed-data
+reference; oracle is its working name, kept for continuity with the tables.
+
 Why this exists
 ---------------
 On synthetic data the paper reports two references, and the distance from ERM to
