@@ -34,6 +34,7 @@ outputs/tables/*
 !outputs/tables/i3lung*meta*.csv
 !outputs/tables/i3lung_prior_estimability.csv
 !outputs/tables/i3lung_loco_selection_bound.csv
+!outputs/tables/i3lung_headroom_ci.csv
 !outputs/tables/center_directions_*.csv
 !outputs/tables/public_rotterdam_gbsg_*_summary.csv
 !outputs/tables/public_rotterdam_gbsg_*_shiftdiag.csv
