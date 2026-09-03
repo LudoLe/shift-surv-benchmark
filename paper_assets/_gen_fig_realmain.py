@@ -72,10 +72,12 @@ MARGIN = 0.02
 
 NAME = {"iw_erm": "IW-ERM", "coral": "CORAL", "dann": "DANN", "cdan": "CDAN",
         "irm": "IRM", "group_dro": "GroupDRO",
-        "prior_recalib": "Prior adjustment", "platt_scaling": "Platt scaling"}
+        "prior_recalib": "Prior adjustment", "platt_scaling": "Platt scaling",
+         "isotonic": "Isotonic"}
 FAMILY = {"iw_erm": C_ADAPT, "coral": C_ADAPT, "dann": C_ADAPT, "cdan": C_ADAPT,
           "irm": C_GENER, "group_dro": C_GENER,
-          "prior_recalib": C_RECAL, "platt_scaling": C_RECAL}
+          "prior_recalib": C_RECAL, "platt_scaling": C_RECAL,
+          "isotonic": C_RECAL}
 
 # (meta prefix, heading, unit of analysis, methods drawn, pooled)
 # pooled=False draws the individual units and their range instead of an
@@ -83,7 +85,8 @@ FAMILY = {"iw_erm": C_ADAPT, "coral": C_ADAPT, "dann": C_ADAPT, "cdan": C_ADAPT,
 SETTINGS = [
     ("i3lung_meta", "I3LUNG Adaptation",
      "6 target cohorts, 30 directed transfers",
-     ["iw_erm", "coral", "dann", "cdan", "prior_recalib", "platt_scaling"],
+     ["iw_erm", "coral", "dann", "cdan", "prior_recalib", "platt_scaling",
+      "isotonic"],
      True),
     ("i3lung_loco_meta", "I3LUNG Domain Generalization",
      "6 held-out centres",
@@ -91,7 +94,8 @@ SETTINGS = [
      True),
     ("public_rotterdam_gbsg_meta", "Registry Adaptation",
      "2 directed transfers",
-     ["iw_erm", "coral", "dann", "cdan", "prior_recalib", "platt_scaling"],
+     ["iw_erm", "coral", "dann", "cdan", "prior_recalib", "platt_scaling",
+      "isotonic"],
      False),
 ]
 
