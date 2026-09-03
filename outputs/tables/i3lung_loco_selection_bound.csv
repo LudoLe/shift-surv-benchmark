@@ -1,0 +1,3 @@
+metric,family,k,estimate,ci_lo,ci_hi,p,picks
+auroc,irm+group_dro,6,0.00246,-0.005504,0.010424,0.544963,GHD:irm;INT:irm;MH:irm;SZMC:irm;UOC:irm;VHIO:group_dro
+ece,irm+group_dro+platt_scaling,6,0.016543,-0.000438,0.033524,0.056212,GHD:group_dro;INT:group_dro;MH:platt_scaling;SZMC:platt_scaling;UOC:platt_scaling;VHIO:group_dro
