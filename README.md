@@ -1,240 +1,125 @@
-# SHIFT-SURV: A Synthetic Benchmark for Distribution Shift in Fixed-Horizon Survival Risk Prediction
+# SHIFT-SURV
 
-Synthetic benchmark for studying how covariate shift, concept shift, baseline hazard shift,
-and spurious correlations affect **fixed-horizon survival-risk models** transported across
-clinical sites.
+Benchmark and evaluation framework for **fixed-horizon survival-risk prediction under
+multi-center distribution shift**. Companion code for the paper *"SHIFT-SURV: Diagnosing Why
+Domain Adaptation Fails in Multi-Center Survival Risk Prediction"* (under review).
 
-## Scope
+A latent-factor Weibull proportional-hazards generator produces multi-center cohorts and
+perturbs one shift mechanism at a time (covariate, measurement, spurious association,
+baseline hazard, label prior, concept). Domain adaptation (IW-ERM, CORAL, DANN, CDAN),
+domain generalization (IRM, GroupDRO) and recalibration (prior adjustment, Platt scaling,
+isotonic regression) are evaluated against two reference models: a **latent-feature
+reference** fitted on the true generative factors, and an **observed-data reference**
+fitted to the target center's own covariates and labels out of fold. The same pipeline
+runs on two real cohorts: the six-center I3LUNG lung-cancer cohort (private) and the
+public Rotterdam–GBSG2 breast-cancer registry.
 
-The data-generating process is a Weibull proportional-hazards survival model (see
-[Generator](#generator)), but the prediction task evaluated here is **fixed-horizon binary
-classification**: the label is `y = 1[T ≤ τ]` (event by τ = 6 months) and every method is a
-classifier of that label. The benchmark therefore measures transportability of fixed-horizon
-*risk* under multi-center shift, not estimation of the full survival curve. The main benchmark
-is **uncensored** (every event time is observed before τ); the generator additionally supports
-independent censoring and a mixture-cure model, used only by the appendix `cure_shift` scenario.
-We do not fit time-to-event models (Cox, RSF, DeepSurv) — extending the protocol to censored,
-curve-level evaluation is left as future work.
+## Repository map
+
+| Path | Content |
+|---|---|
+| `generator/` | data-generating process and the six shift scenarios |
+| `experiments/` | training, evaluation, per-run hyperparameter selection, meta-analysis, sensitivity sweep |
+| `data/` | cohort loaders (I3LUNG, Rotterdam–GBSG2) |
+| `configs/` | generator parameters (`generator.yaml`) |
+| `outputs/tables/` | **the tracked result tables every paper number comes from** |
+| `outputs/figures/paper/` | the three figures the paper includes |
+| `paper_assets/` | figure generators (`_gen_fig_disc.py`, `_gen_fig_cal.py`, `_gen_fig_realmain.py`; `_gen_fig_predictability.py` prints the Spearman quoted in the discussion) |
+| `reproduce_figures.ipynb` | rebuilds the paper figures from the tracked tables |
+| `tests/` | generator and pipeline invariants (43 tests) |
+
+## Environment
+
+`adapt==0.4.5` targets Keras 2; TensorFlow ≥ 2.16 ships Keras 3, which silently degrades
+DANN and CDAN. The pins therefore require Python 3.10/3.11, `tensorflow<2.16`, `numpy<2`
+(full rationale in `requirements.txt`).
+
+```bash
+bash setup_env.sh              # creates conda env "shift310" and installs the pins
+conda activate shift310
+python -c "import keras, adapt; print(keras.__version__)"   # must print 2.x
+```
+
+## Data
+
+- **Synthetic benchmark**: no data needed.
+- **I3LUNG**: private clinical cohort, not distributed (see LICENSE). Every I3LUNG stage
+  takes a data directory containing `cb.csv`, `outcomes.csv`, `features.json`.
+- **Rotterdam–GBSG2**: public. GBSG2 loads through `scikit-survival`; Rotterdam comes from
+  the Rdatasets mirror of the R `survival` package:
+
+```bash
+mkdir -p data/public
+curl -L -o data/public/rotterdam.csv \
+  https://raw.githubusercontent.com/vincentarelbundock/Rdatasets/master/csv/survival/rotterdam.csv
+```
 
 ## Reproducing the paper
 
-The result tables the paper is built from are tracked in this repository, so the
-figures can be rebuilt without rerunning anything:
+### From the tracked tables (no data access, minutes)
+
+The tables in `outputs/tables/` are the exact final-run outputs behind the paper. From them:
 
 ```bash
-jupyter notebook reproduce_figures.ipynb
-```
-
-The sections below rebuild those tables from scratch. Each stage writes to
-`outputs/tables/` and is independent of the others, so they can be run in any
-order or skipped.
-
-### 0. Environment
-
-`adapt==0.4.5` targets Keras 2, and TensorFlow 2.16 and later ship Keras 3, which
-silently degrades DANN and CDAN. The pins therefore need Python 3.10 or 3.11.
-
-```bash
-bash setup_env.sh          # creates the conda environment and installs the pins
-conda activate shift310
-python -c "import adapt, tensorflow; print(adapt.__version__, tensorflow.__version__)"
-```
-
-### 1. Synthetic benchmark
-
-Produces the discrimination and calibration results per shift regime, under both
-the adaptation protocol and the domain-generalization protocol.
-
-```bash
-bash experiments/run_all_synthetic.sh
-```
-
-Writes `benchmark_1s1t_iwcv_*`, `benchmark_1s1t_prior_*`, `benchmark_3s1t_*`,
-`benchmark_1s1t_full_*` and `ablation_no_iwcv_*`. Around two hours on a machine
-with a few free cores; the individual commands are listed further down for
-running one at a time.
-
-### 2. I3LUNG
-
-Needs the cohort, which is not public. The directory must contain `cb.csv`,
-`outcomes.csv` and `features.json`.
-
-```bash
-export I3LUNG_DATA=/path/to/I3LUNG_DATA
-bash experiments/run_all_realdata.sh $I3LUNG_DATA        # 30 directed transfers
-python -m experiments.run_real_data --dataset i3lung \
-       --data_dir $I3LUNG_DATA --loco                    # leave-one-centre-out
-python -m experiments.meta_analysis --prefix i3lung --by_target
-python -m experiments.meta_analysis --prefix i3lung --exclude loco \
-       --out_prefix i3lung_meta_pairs                    # thirty-pair control
-python -m experiments.meta_analysis --prefix i3lung_loco
-python -m experiments.prior_estimability --data_dir $I3LUNG_DATA
-python -m experiments.center_directions --data_dir $I3LUNG_DATA
-```
-
-The two meta-analyses answer different questions. `--by_target` pools the five
-transfers that share a target cohort and carries six disjoint units, which is the
-level at which the independence assumption holds; it is the analysis the paper
-quotes. The pairwise version treats all thirty transfers as units and is reported
-alongside as a control.
-
-### 3. Public registry
-
-Rotterdam and GBSG2 download themselves, so this stage needs no local data.
-
-```bash
-bash experiments/run_all_public.sh rotterdam_gbsg
+bash paper_assets/make_paper_figures.sh        # or: jupyter notebook reproduce_figures.ipynb
+python -m experiments.meta_analysis --prefix i3lung --exclude loco --by_target --out_prefix i3lung
+python -m experiments.meta_analysis --prefix i3lung --exclude loco --out_prefix i3lung_meta_pairs
+python -m experiments.meta_analysis --prefix i3lung_loco --out_prefix i3lung_loco
 python -m experiments.meta_analysis --prefix public_rotterdam_gbsg
 ```
 
-### 4. Sensitivity analysis
+The meta-analysis stage reads only tracked per-transfer tables, so it reproduces the pooled
+rows byte for byte on a fresh clone.
 
-Repeats the benchmark across the generator's free parameters, sampled with a
-Latin hypercube. Every method that has a hyperparameter is selected per run by
-the importance-weighted criterion, which is the protocol the main experiments
-use.
+### Full re-run
 
-```bash
-bash experiments/run_sensitivity_parallel.sh
-```
+Stages are independent unless a later one reads an earlier one's tables. `$I3LUNG_DATA` is
+the private cohort directory.
 
-This is the expensive stage, measured in machine-days rather than hours. It
-splits by regime and by source count, and each shard writes its own CSV, so the
-work survives an interruption and rerunning the script resumes from what is
-missing.
+| # | Stage | Command | Writes | Time |
+|---|---|---|---|---|
+| 1 | Synthetic benchmark + sample-size sweep | `bash experiments/run_all_synthetic.sh` | `benchmark_1s1t_iwcv_*`, `benchmark_1s1t_prior_*`, `benchmark_3s1t_*`, `n_sweep_iwcv_*`, `survival_cox_*` | ~2 h, multi-core |
+| 2 | Nonlinear-observation ablation | `python -m experiments.run_adaptation --nl_strength 0.5 --n_sweep 250,500,1000,2000 --out_prefix nl_nsweep` and the same with `--scenarios prior_shift --out_prefix nl_nsweep_prior` | `nl_nsweep_*` | ~1 h |
+| 3 | Sensitivity sweep (1692 configurations) | `bash run_tuneall.sh` and `bash run_oat_tuneall.sh` (self-resuming shards), then the confirmation runs (`python -m experiments.sensitivity_sweep --mode confirm …`, flags in the script header), then `python -m experiments.collect_sweep` | `sens_tuneall_*` | days |
+| 4 | I3LUNG: 30 transfers + 6 LOCO folds | `bash experiments/run_all_parallel.sh $I3LUNG_DATA` (or `run_all_realdata.sh` for the transfers alone) | `i3lung_*_{summary,bootstrap,shiftdiag}.csv` | hours |
+| 5 | Registry | `bash experiments/run_all_public.sh rotterdam_gbsg` | `public_rotterdam_gbsg_*` | ~1 h |
+| 6 | References and diagnostics | `python -m experiments.real_target_oracle --data_dir $I3LUNG_DATA` (and `--dataset rotterdam_gbsg --tau 36`), `python -m experiments.headroom_ci --data_dir $I3LUNG_DATA`, `python -m experiments.prior_estimability --data_dir $I3LUNG_DATA` | `*_target_oracle.csv`, `i3lung_headroom_ci.csv`, `i3lung_prior_estimability.csv` | ~1 h |
+| 7 | Censored-survival check on I3LUNG | `python -m experiments.run_survival_real --data_dir $I3LUNG_DATA` | `survival_real_transfers.csv` | minutes |
+| 8 | Meta-analysis | the four `meta_analysis` invocations above | `*_meta.csv`, selection bounds | minutes |
 
-### 5. Figures
+### Where each paper number lives
 
-```bash
-jupyter notebook reproduce_figures.ipynb
-```
+| Paper element | Tracked tables |
+|---|---|
+| Synthetic discrimination / calibration figures | `benchmark_1s1t_iwcv_*`, `benchmark_1s1t_prior_*` (+ `_maxstat` for the tests) |
+| Domain-generalization table | `benchmark_3s1t_*`, `benchmark_3s1t_prior_*` |
+| Observed-data headroom table | `i3lung_headroom_ci.csv` |
+| Real-cohort forest plot and pooled effects | `i3lung_meta.csv`, `i3lung_meta_pairs_meta.csv`, `i3lung_loco_meta.csv`, `public_rotterdam_gbsg_*_bootstrap.csv` |
+| Per-transfer interval counts | `i3lung_<SRC>_<TGT>_bootstrap.csv` (30 files) |
+| Selection upper bounds | `best_per_transfer` rows of the metas, `i3lung_loco_selection_bound.csv`, registry bootstraps |
+| Prior-adjustment failure mechanism | `i3lung_prior_estimability.csv` |
+| Center heterogeneity (RBF-MMD, prevalence) | `i3lung_*_shiftdiag.csv`, `public_rotterdam_gbsg_*_shiftdiag.csv` |
+| Sensitivity analysis | `sens_tuneall_{worlds,oat,confirm}_*` |
+| Sample-size paragraph | `n_sweep_iwcv_*` |
+| Nonlinear-observation paragraph | `nl_nsweep_*` |
+| Fixed-horizon / Cox paragraph | `survival_cox_*`, `survival_real_transfers.csv` |
+| Discussion Spearman (covariate discrepancy vs loss) | `i3lung_*_shiftdiag.csv` + `i3lung_*_summary.csv`, computed by `paper_assets/_gen_fig_predictability.py` |
+| Observed-data reference on real cohorts | `i3lung_target_oracle.csv`, `public_rotterdam_gbsg_target_oracle.csv` |
 
-or, one at a time:
+## Determinism
 
-```bash
-python paper_assets/_gen_fig_disc.py
-python paper_assets/_gen_fig_cal.py
-python paper_assets/_gen_fig_realmain.py
-python paper_assets/_gen_fig_predictability.py
-```
+All scikit-learn-based methods and the generator are byte-reproducible from their seeds.
+DANN and CDAN train on TensorFlow, whose op-level nondeterminism means they reproduce in
+distribution across machines; every DANN/CDAN number in the paper is a mean over 10 seeds
+with its confidence interval.
 
-## Additional analyses
-
-The diagnostic analyses quoted in the paper each have a module of their own:
-`real_target_oracle` fits the observed-data reference per target center,
-`prior_estimability` reads out the EM estimate of the target prevalence,
-`center_directions` compares the decision directions the centers' models learn,
-`coral_covariance_check` ranks transfers by the covariance distance CORAL
-aligns, and `collect_sweep` merges the sharded sensitivity sweep and prints the
-counts the paper quotes. `rebuild_summaries` regenerates every summary table
-from its raw table without refitting. `registry_seer.py` and
-`registry_support2.py` are additional public-registry loaders that the paper
-does not use.
-
-Naming note: the paper calls the two reference models the latent-feature
-reference and the observed-data reference. In the code and in the result
-tables they appear under their working names, invariant_oracle and
-observed_target_oracle (module experiments/real_target_oracle.py, tables
-*_target_oracle.csv). Same objects, earlier names, kept so that the tracked
-tables remain byte-identical to the published runs.
-
-Two reproducibility notes. `outputs/tables` is tracked: commit rerun outputs
-before rebasing, or the rebase will overwrite them with the committed versions.
-And the DANN/CDAN rows are not bit-reproducible across runs -- TensorFlow
-training is nondeterministic -- so those entries reproduce in distribution,
-while every other method reproduces exactly.
-
-## Individual commands
+## Tests
 
 ```bash
-# Adaptation protocol, one source centre, seven core scenarios
-python -m experiments.run_adaptation
-
-# Domain-generalization protocol: three source centres, adds IRM and GroupDRO
-python -m experiments.run_adaptation --n_source_domains 3 --out_prefix benchmark_3s1t
-
-# Appendix scenarios (strong_covariate_shift, cure_shift)
-python -m experiments.run_adaptation --include_appendix --out_prefix benchmark_1s1t_full
-
-# Ablation: covariate shift without importance-weighted hyperparameter selection
-python -m experiments.run_adaptation --scenarios covariate_shift --no_iwcv \
-    --out_prefix ablation_no_iwcv
-
-# One I3LUNG transfer
-python -m experiments.run_real_data --dataset i3lung --data_dir $I3LUNG_DATA \
-    --source INT --target GHD
-
-# Sensitivity, one regime at a time
-python -m experiments.sensitivity_sweep --mode worlds --n_source_domains 1 \
-    --regimes concept_shift --n_seeds 10 --n_worlds 100 --with_nets --tune_all
+python -m pytest    # 43 passed
 ```
 
-Outputs are written to `outputs/tables/<prefix>_{raw,summary,compact,maxstat}.csv`.
+## License and citation
 
-## Scenarios
-
-| Scenario | What shifts | Expected effect |
-|---|---|---|
-| `no_shift` | nothing | baseline, gap ≈ 0 |
-| `covariate_shift` | P(X): latent means μ only | AUROC stable (P(Y\|u_inv) fixed) |
-| `observational_shift` | P(X) + A_inv rotated 60° | AUROC drops, DA methods recover partially |
-| `spurious_shift` | latent cross-covariance | spurious features become unreliable |
-| `baseline_hazard_shift` | λ₀ only | AUROC stable, ECE degrades; recalibration helps |
-| `concept_shift` | w_d partial sign flip | AUROC drops, no method recovers |
-| `shape_shift` | Weibull shape ν | calibration degrades; ranking preserved |
-| `prior_shift` | P(Y): class-conditional resample, P(X\|Y) fixed | pure label shift; Prior-EM recovers ECE (calibration positive control, appendix) |
-| `strong_covariate_shift` | P(X): A_spu rotated 90° + noise | positive control, large gap (appendix) |
-| `cure_shift` | cure fraction | non-PH, appendix only |
-
-## Methods
-
-| Method | Key | Description |
-|---|---|---|
-| Invariant oracle | `inv_oracle` | LR on true latent u_inv — upper bound |
-| ERM LR | `lr_erm` | Pooled source logistic regression |
-| IW-ERM | `iw_erm` | Importance-weighted ERM (covariate-shift correction) |
-| CORAL | `coral` | Covariance alignment + LR |
-| IRM | `irm` | Invariant Risk Minimization (IRMv1, linear; only added when `--n_source_domains >= 2`) |
-| Prior recalibration | `prior_recalib` | Saerens EM prior-shift correction (no target labels) |
-| Platt scaling | `platt_scaling` | Sigmoid post-hoc calibration on source val |
-| Isotonic | `isotonic` | Isotonic post-hoc calibration on source val |
-| DANN | `dann` | Domain-adversarial network, IWCV HP tuning |
-| CDAN | `cdan` | Conditional DANN, IWCV HP tuning |
-| GroupDRO | `group_dro` | Worst-source-center robust optimization (domain generalization, no target data); only added when `--n_source_domains >= 2` |
-
-## Generator
-
-The data-generating process is a Weibull proportional hazards model:
-
-- Event time: T = (−log U / (λ₀ exp(η)))^(1/ν)
-- Binary label: y = 1[T ≤ τ],  τ = 6 months
-- Latent factors: u_inv (k=3, invariant) + u_spu (k=2, spurious)
-- Observed covariates: x = A_inv u_inv + A_spu u_spu  (p=20, linear)
-- Risk: η = w_d · u_inv + w_spu · u_spu
-
-Each shift scenario modifies exactly one component of the DGP.
-
-## Configuration
-
-Every structural constant, per-domain default and per-scenario shift parameter is declared in
-[`configs/generator.yaml`](configs/generator.yaml) — the single place to read or change what the
-benchmark ran with. Point `SHIFT_SURV_CONFIG` at another file to use a different one:
-
-```bash
-SHIFT_SURV_CONFIG=configs/my_variant.yaml python -m experiments.run_adaptation
-```
-
-The Python defaults mirror the config exactly, so the code also runs without it (and without
-`pyyaml`). `tests/test_config.py` enforces both halves of that contract: the YAML values must
-equal the Python defaults, and generation must be bit-identical with and without the config.
-Explicit keyword arguments still override the config, which is how the sweeps and ablations vary
-one parameter at a time.
-
-## Protocol
-
-- 1 source domain + 1 target domain, 500 samples each
-- 80/20 stratified source train/val split
-- StandardScaler fitted on source train only
-- Target labels never used during training or HP selection
-- DANN/CDAN HP tuning via importance-weighted cross-validation (IWCV)
-- 10 random seeds, results reported as mean ± 95% CI
+MIT (see LICENSE; the I3LUNG clinical data are not part of this repository).
+Citation metadata in `CITATION.cff`.
