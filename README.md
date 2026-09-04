@@ -68,8 +68,11 @@ python -m experiments.meta_analysis --prefix i3lung_loco --out_prefix i3lung_loc
 python -m experiments.meta_analysis --prefix public_rotterdam_gbsg
 ```
 
-The meta-analysis stage reads only tracked per-transfer tables, so it reproduces the pooled
-rows byte for byte on a fresh clone.
+The pairs, generalization, and registry metas read only tracked per-transfer tables and
+reproduce byte for byte on a fresh clone. The by-target meta additionally needs the
+patient-level bootstrap replicate matrices (, large and untracked) for its
+joint standard errors; stage 4 of the full re-run regenerates them, after which it too
+reproduces byte for byte.
 
 ### Full re-run
 
