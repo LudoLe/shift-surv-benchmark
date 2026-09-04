@@ -70,7 +70,7 @@ python -m experiments.meta_analysis --prefix public_rotterdam_gbsg
 
 The pairs, generalization, and registry metas read only tracked per-transfer tables and
 reproduce byte for byte on a fresh clone. The by-target meta additionally needs the
-patient-level bootstrap replicate matrices (, large and untracked) for its
+patient-level bootstrap replicate matrices (`*_bootreps.csv`, large and untracked) for its
 joint standard errors; stage 4 of the full re-run regenerates them, after which it too
 reproduces byte for byte.
 
