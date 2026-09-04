@@ -1,2 +1,0 @@
-n_transfers,d_mean_median,d_cov_median,cov_share_median,cov_share_min,cov_share_max,mmd_median,clf_linear_median,quad_minus_linear_median,nonlin_minus_quad_median,n_transfers_quad_beats_linear,n_transfers_nonlin_beats_quad
-32,1.11633,1.76727,0.62352,0.47159,0.91752,0.0448,0.7551,-0.01502,0.09813,5,32

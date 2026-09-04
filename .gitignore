@@ -1,10 +1,9 @@
 # ── Clinical / sensitive data ─────────────────────────────────────────────────
 data/raw/
 data_multimodal/
+I3LUNG_DATA/
 
 # ── Other-paper code (kept on disk, out of this repo) ─────────────────────────
-# This repo (SHIFT-SURV) only tracks the synthetic-benchmark + I3LUNG pipeline.
-# The files below belong to a separate paper and are intentionally untracked.
 data/
 generator/fitting.py
 generator/shift_components.py
@@ -12,50 +11,65 @@ utils/plotting.py
 
 # ── Experiment outputs (regenerable) ─────────────────────────────────────────
 outputs/*
-!outputs/figures/
-outputs/figures/*
-!outputs/figures/paper/
 outputs [0-9]*/
 
 # ── Result tables the paper is built from ────────────────────────────────────
-# Every number and figure in the paper comes from the files below, so they are
-# tracked and a reader can rebuild the figures without rerunning anything. The
-# list is a whitelist rather than a wildcard: the same directory also holds
-# per-shard intermediates and patient-level bootstrap replicates, and those are
-# large, uninteresting, and easy to regenerate.
+# Every number and figure in the paper traces to the files whitelisted below,
+# so they are tracked and a reader can rebuild the figures without rerunning
+# anything. The same directory also holds per-shard intermediates and bootstrap
+# replicate matrices; those are large, regenerable, and stay ignored.
 !outputs/tables/
 outputs/tables/*
-!outputs/tables/benchmark_*_summary.csv
-!outputs/tables/benchmark_*_maxstat.csv
-!outputs/tables/benchmark_*_raw.csv
-!outputs/tables/ablation_*_summary.csv
+!outputs/tables/benchmark_1s1t_iwcv_*.csv
+!outputs/tables/benchmark_1s1t_prior_*.csv
+!outputs/tables/benchmark_3s1t_*.csv
+!outputs/tables/n_sweep_iwcv_*_summary.csv
+!outputs/tables/n_sweep_iwcv_*_compact.csv
+!outputs/tables/nl_nsweep_*_summary.csv
+!outputs/tables/nl_nsweep_*_compact.csv
+!outputs/tables/sens_tuneall_worlds_*.csv
+!outputs/tables/sens_tuneall_oat_*.csv
+!outputs/tables/sens_tuneall_confirm_*.csv
 !outputs/tables/i3lung_*_summary.csv
 !outputs/tables/i3lung_*_shiftdiag.csv
-!outputs/tables/i3lung*meta*.csv
+!outputs/tables/i3lung_*_bootstrap.csv
+!outputs/tables/i3lung_meta.csv
+!outputs/tables/i3lung_meta_pairs.csv
+!outputs/tables/i3lung_meta_pairs_meta.csv
+!outputs/tables/i3lung_loco_meta.csv
 !outputs/tables/i3lung_prior_estimability.csv
 !outputs/tables/i3lung_loco_selection_bound.csv
 !outputs/tables/i3lung_headroom_ci.csv
-!outputs/tables/center_directions_*.csv
 !outputs/tables/public_rotterdam_gbsg_*_summary.csv
 !outputs/tables/public_rotterdam_gbsg_*_shiftdiag.csv
-!outputs/tables/public_rotterdam_gbsg_meta*.csv
-!outputs/tables/sensitivity_*.csv
-!outputs/tables/sens_tuneall_worlds_*.csv
-!outputs/tables/sens_tuned_worlds_*.csv
-!outputs/tables/shift_audit_*.csv
+!outputs/tables/public_rotterdam_gbsg_*_bootstrap.csv
+!outputs/tables/public_rotterdam_gbsg_meta.csv
 !outputs/tables/survival_cox_*.csv
 !outputs/tables/survival_real_transfers.csv
 !outputs/tables/*_target_oracle.csv
-!outputs/tables/i3lung_covariance_distance.csv
-!outputs/tables/nl_nsweep_*_summary.csv
-!outputs/tables/nl_nsweep_*_compact.csv
-!outputs/tables/oat_tuneall_worlds_*.csv
 
-# Re-ignore what the patterns above would otherwise sweep in: one file per
-# sweep shard, and the bootstrap replicate matrices at five megabytes each.
+# Re-ignore what the patterns above would otherwise sweep in: per-shard sweep
+# files, bootstrap replicate matrices, per-seed and ensemble diagnostics, smoke
+# runs and ad-hoc comparison scratch.
 outputs/tables/*_s[0-9].csv
 outputs/tables/*_s[0-9][0-9].csv
 outputs/tables/*_bootreps.csv
+outputs/tables/*_byseed.csv
+outputs/tables/*_ensemble.csv
+outputs/tables/smoke_*
+outputs/tables/_cmp_*
+
+# ── Paper figures (only what the paper includes) ─────────────────────────────
+!outputs/figures/
+outputs/figures/*
+!outputs/figures/paper/
+outputs/figures/paper/*
+!outputs/figures/paper/fig_disc_a.pdf
+!outputs/figures/paper/fig_disc_a.png
+!outputs/figures/paper/fig_cal_a.pdf
+!outputs/figures/paper/fig_cal_a.png
+!outputs/figures/paper/fig_realmain.pdf
+!outputs/figures/paper/fig_realmain.png
 
 # ── Python cache ──────────────────────────────────────────────────────────────
 __pycache__/
@@ -99,8 +113,3 @@ build/
 scratch/
 local/
 tmp/
-
-# ── Data ───────────────────────────────────────────────────
-
-I3LUNG_DATA/*
-

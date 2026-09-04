@@ -1,7 +1,0 @@
-transfer,source,target,tau,n_tgt,mmd,mmd_p,prevalence_gap,auroc_best,auroc_gap,auroc_p_raw,auroc_p_holm,auroc_recovers,ece_best,ece_gap,ece_p_raw,ece_p_holm,ece_recovers
-public_rotterdam_gbsg_GBSG2_Rotterdam_tau24,GBSG2,Rotterdam,24.0,2933,0.1069,0.001,0.0555,iw_erm,0.0157,0.052,0.156,False,iw_erm,0.033,0.0,0.0,True
-public_rotterdam_gbsg_GBSG2_Rotterdam_tau36,GBSG2,Rotterdam,36.0,2894,0.0996,0.001,0.1023,coral,0.0056,0.005,0.02,True,iw_erm,0.0281,0.0,0.0,True
-public_rotterdam_gbsg_GBSG2_Rotterdam_tau48,GBSG2,Rotterdam,48.0,2851,0.0983,0.001,0.1688,coral,0.0031,0.17,0.282,False,prior_recalib,0.0554,0.0,0.0,True
-public_rotterdam_gbsg_Rotterdam_GBSG2_tau24,Rotterdam,GBSG2,24.0,623,0.1164,0.001,0.0555,cdan,0.0108,0.085,0.34,False,cdan,0.008,0.457,1.0,False
-public_rotterdam_gbsg_Rotterdam_GBSG2_tau36,Rotterdam,GBSG2,36.0,555,0.1109,0.001,0.1023,cdan,0.005,0.384,1.0,False,prior_recalib,0.0224,0.442,1.0,False
-public_rotterdam_gbsg_Rotterdam_GBSG2_tau48,Rotterdam,GBSG2,48.0,491,0.1145,0.001,0.1688,iw_erm,0.0119,0.109,0.436,False,coral,0.0107,0.019,0.114,False

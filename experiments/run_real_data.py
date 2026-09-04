@@ -127,7 +127,6 @@ def load_i3lung_all(
 # Public multicentric registries selectable from the CLI.
 _PUBLIC_REGISTRIES = {
     "rotterdam_gbsg": "data.registry_rotterdam_gbsg",
-    "seer":           "data.registry_seer",
 }
 
 
