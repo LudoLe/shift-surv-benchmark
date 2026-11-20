@@ -83,8 +83,9 @@ C_ERM = "#1F6FB4"
 C_OBS_ORACLE = "#CFCFCF"
 C_LAT_ORACLE = "#4D4D4D"
 
-from _style import apply as _apply_style, finish as _finish_axes
+from _style import apply as _apply_style, finish as _finish_axes, apply_print, COLUMN_WIDTH
 _apply_style()
+apply_print()
 
 
 def load_summary(prefix: str) -> dict:
@@ -226,12 +227,12 @@ def draw_panel(ax, panel_key: str) -> None:
             ax.bar(pos, mean, width=w, color=colour, zorder=2, edgecolor="none")
             if ci == ci:
                 ax.errorbar(pos, mean, yerr=ci, fmt="none", ecolor="#333333",
-                            elinewidth=1.0, capsize=2.5, zorder=5)
+                            elinewidth=0.8, capsize=1.8, zorder=5)
             pts = raw.get((key, m), [])
             if pts:
                 jit = (np.random.default_rng(i * 10 + j).random(len(pts)) - 0.5) * w * 0.55
-                ax.scatter(pos + jit, pts, s=13, facecolors="none",
-                           edgecolors=colour, linewidths=0.8, alpha=0.85,
+                ax.scatter(pos + jit, pts, s=8, facecolors="none",
+                           edgecolors=colour, linewidths=0.6, alpha=0.85,
                            zorder=6)
 
         # The bracket spans the two bars the test actually compared. A label
@@ -267,7 +268,7 @@ def draw_panel(ax, panel_key: str) -> None:
             if tested:
                 _caption_notes.append((key, tested, star_of(stars, key)))
             ax.text(0.5 * (x0 + x1), yb + 0.004, star_of(stars, key),
-                    ha="center", va="bottom", fontsize=8.5, color="#333333")
+                    ha="center", va="bottom", fontsize=7.5, color="#333333")
 
     ax.set_xticks(x)
     ax.set_xticklabels([lbl for _k, lbl in scen], rotation=30, ha="right")
@@ -288,8 +289,8 @@ def draw_panel(ax, panel_key: str) -> None:
                label="Latent-feature reference"),
         Patch(facecolor=C_ERM, label="ERM"),
         Patch(facecolor=cfg["colour"], label=cfg["family_label"]),
-    ], loc="upper left", frameon=False, fontsize=7.5, ncol=2,
-       handlelength=1.5, handletextpad=0.5, columnspacing=1.0,
+    ], loc="upper left", frameon=False, fontsize=7, ncol=2,
+       handlelength=1.3, handletextpad=0.4, columnspacing=0.8,
        borderaxespad=0.3)
 
 
@@ -332,12 +333,13 @@ def main() -> None:
     os.makedirs(args.outdir, exist_ok=True)
 
     for panel in ("a", "b"):
-        fig, ax = plt.subplots(figsize=(4.6, 4.4))
+        # Drawn at \columnwidth: include with width=\columnwidth, no scaling.
+        fig, ax = plt.subplots(figsize=(COLUMN_WIDTH, 3.0))
         draw_panel(ax, panel)
-        fig.tight_layout()
+        fig.tight_layout(pad=0.2)
         for ext in ("pdf", "png"):
             out = os.path.join(args.outdir, f"fig_disc_{panel}.{ext}")
-            fig.savefig(out, bbox_inches="tight")
+            fig.savefig(out)
         plt.close(fig)
         print(f"  scritto {args.outdir}/fig_disc_{panel}.{{pdf,png}}")
         _print_caption_notes(f"fig:disc panel {panel}")

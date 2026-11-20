@@ -57,8 +57,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TABLES = os.path.join(ROOT, "outputs", "tables")
 OUTDIR = os.path.join(ROOT, "outputs", "figures", "paper")
 
-from _style import apply as _apply_style
+from _style import apply as _apply_style, apply_print, TEXT_WIDTH
 _apply_style()
+apply_print()
 
 ERM = "lr_erm"
 C_ADAPT, C_GENER, C_RECAL = "#D95F0E", "#1B9E77", "#E6B422"
@@ -187,8 +188,8 @@ def layout():
             rows.append((y, prefix, m, pooled))
             y += 1.0
         bands.append((top - 0.5, y - 0.5, head, unit))
-        y += 1.7
-    total = y - 1.7
+        y += 1.8
+    total = y - 1.8
     return [(total - yy, p, m, k) for yy, p, m, k in rows], \
            [(total - b, total - a, h, u) for a, b, h, u in bands], total
 
@@ -235,8 +236,8 @@ def draw(ax, metric, meta, per_unit, rows, bands, total, xlabel, is_auroc):
         col = FAMILY[m]
 
         if is_auroc and col == C_RECAL:
-            ax.plot([0.0], [y], marker="D", ms=4.6, mfc="none", mec=GREY,
-                    mew=0.9, zorder=5)
+            ax.plot([0.0], [y], marker="D", ms=3.6, mfc="none", mec=GREY,
+                    mew=0.8, zorder=5)
             continue
 
         pts = per_unit.get((prefix, metric, m), [])
@@ -248,25 +249,26 @@ def draw(ax, metric, meta, per_unit, rows, bands, total, xlabel, is_auroc):
                 ax.plot([min(pts), max(pts)], [y, y], color=col, lw=0.9,
                         ls=(0, (2, 2)), zorder=4)
             if pts:
-                ax.plot(pts, [y] * len(pts), marker="o", ls="none", ms=4.0,
+                ax.plot(pts, [y] * len(pts), marker="o", ls="none", ms=3.2,
                         color=col, mec="white", mew=0.6, zorder=5)
             continue
 
         # Units sit just below the pooled row so the two do not collide.
         if pts:
-            ax.scatter(pts, [y - 0.24] * len(pts), s=11, color=col, alpha=0.32,
+            ax.scatter(pts, [y - 0.24] * len(pts), s=7, color=col, alpha=0.32,
                        edgecolors="none", zorder=3)
         e = meta.get(prefix, {}).get((metric, m))
         if e:
             est, lo, hi, _k = e
-            ax.plot([lo, hi], [y, y], color=col, lw=1.6, solid_capstyle="round",
+            ax.plot([lo, hi], [y, y], color=col, lw=1.3, solid_capstyle="round",
                     zorder=4)
-            ax.plot([est], [y], marker="D", ms=5.2, color=col, mec="white",
+            ax.plot([est], [y], marker="D", ms=4.2, color=col, mec="white",
                     mew=0.7, zorder=5)
 
     ax.set_yticks([y for y, _p, _m, _k in rows])
     ax.set_yticklabels([NAME[m] for _y, _p, m, _k in rows])
-    ax.set_ylim(-0.9, total + 2.1)
+    ax.set_ylim(-0.6, total + 1.9)
+    ax.tick_params(axis="y", labelsize=7.5)
     ax.set_xlabel(xlabel)
     for sp in ("top", "right", "left"):
         ax.spines[sp].set_visible(False)
@@ -283,7 +285,8 @@ def main() -> None:
     per_unit = units(args.tables)
     rows, bands, total = layout()
 
-    fig, axes = plt.subplots(1, 2, figsize=(7.16, 3.9), sharey=True)
+    # Drawn at \textwidth: include with width=\textwidth, no scaling.
+    fig, axes = plt.subplots(1, 2, figsize=(TEXT_WIDTH, 2.9), sharey=True)
     draw(axes[0], "auroc", meta, per_unit, rows, bands, total,
          r"$\Delta$ AUROC", True)
     draw(axes[1], "ece", meta, per_unit, rows, bands, total,
@@ -299,8 +302,8 @@ def main() -> None:
 
     # subplots_adjust first: the heading positions are computed from the axes
     # transform, which is only final once the layout is.
-    fig.subplots_adjust(left=0.185, right=0.99, top=0.945, bottom=0.125,
-                        wspace=0.07)
+    fig.subplots_adjust(left=0.15, right=0.99, top=0.925, bottom=0.13,
+                        wspace=0.05)
 
     # Drawn on the figure, not the left axes: the right panel has an opaque
     # background and covers any heading long enough to overflow.
@@ -308,12 +311,12 @@ def main() -> None:
         yfig = fig.transFigure.inverted().transform(
             axes[0].transData.transform((0, hi + 0.35)))[1]
         fig.text(LEFT_EDGE, yfig + 0.015, head, ha="left", va="baseline",
-                 fontsize=7.8, fontweight="bold", color="#2E2E2E")
+                 fontsize=7.5, fontweight="bold", color="#2E2E2E")
 
     for ax, title in ((axes[0], "Discrimination"), (axes[1], "Calibration")):
         x0 = ax.get_position().x0
-        fig.text(0.5 * (x0 + ax.get_position().x1), 0.965, title,
-                 ha="center", va="baseline", fontsize=9.0,
+        fig.text(0.5 * (x0 + ax.get_position().x1), 0.955, title,
+                 ha="center", va="baseline", fontsize=8.5,
                  fontweight="bold", color="#2E2E2E")
 
 

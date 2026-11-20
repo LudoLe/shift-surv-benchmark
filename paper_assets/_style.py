@@ -121,3 +121,31 @@ def seed_points(ax, xs, ys, colour: str, size: float = 13.0) -> None:
     """
     ax.scatter(xs, ys, s=size, facecolors="none", edgecolors=colour,
                linewidths=0.8, alpha=0.85, zorder=6)
+
+
+# Print sizes. Figures are drawn at the size they are printed in the IEEE
+# two-column layout, so a point on the canvas is a point on the page. Drawing
+# larger and letting LaTeX shrink the image is what made the camera-ready text
+# unreadable: a 4.6 in figure in a 3.5 in column prints 9.5 pt ticks at 7 pt.
+COLUMN_WIDTH = 3.5    # in, \columnwidth
+TEXT_WIDTH = 7.16     # in, \textwidth
+
+
+def apply_print() -> None:
+    """Type sizes for figures drawn at their printed size (>= 7 pt)."""
+    plt.rcParams.update({
+        "font.size": 8,
+        "axes.labelsize": 8.5,
+        "axes.titlesize": 8.5,
+        "xtick.labelsize": 8,
+        "ytick.labelsize": 8,
+        "legend.fontsize": 7,
+        "axes.linewidth": 0.7,
+        "xtick.major.size": 2.5,
+        "ytick.major.size": 2.5,
+        "xtick.major.width": 0.7,
+        "ytick.major.width": 0.7,
+        "savefig.dpi": 300,
+        # TrueType rather than Type 3: IEEE PDF eXpress flags Type 3 fonts.
+        "pdf.fonttype": 42,
+    })
